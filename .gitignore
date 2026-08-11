@@ -1,0 +1,33 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Rust
+/target/
+**/target/
+*.pdb
+
+# Tauri
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/WixTools/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
