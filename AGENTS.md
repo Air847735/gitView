@@ -20,27 +20,19 @@
 
 # Commands and Verification
 
-Rust 工具鏈已安裝（1.97.1）。本機**尚未安裝 C 編譯器**（gcc 缺，需 sudo），
-因此需要編譯 C 的部分（`git2` → libgit2）無法建置。
+開發環境已就緒：Rust 1.97.1、gcc 13.3.0、cmake 3.28.3、Node.js 18.19.1、
+webkit2gtk-4.1 2.52.3。下列指令皆已實際執行並通過。
 
-- Install / setup: rustup 已裝。尚缺：`build-essential`、`libssl-dev`、`cmake`、
-  Tauri 的 Linux 依賴、Node.js。安裝需 sudo 權限。
-- Format: `cargo fmt` — 已執行，通過
-- Lint: `cargo clippy -p gitview-core --no-default-features --target x86_64-unknown-linux-musl -- -D warnings` — 已執行，通過
-- Unit test（純運算部分）: `cargo test -p gitview-core --no-default-features --target x86_64-unknown-linux-musl` — 已執行，16 項通過
-- Unit test（完整）: 待確認，需 C 編譯器
-- Run / develop: 待確認（預期為 `cargo tauri dev`）
-- Build / package: 待確認（預期為 `cargo tauri build`）
-- Benchmark（適用時）: 未定義
+- Install / setup: 見 `README.md`。系統依賴安裝需 sudo 權限。
+- Format: `cargo fmt` — 通過
+- Lint: `cargo clippy --workspace --all-targets -- -D warnings` — 通過
+- Unit / integration test: `cargo test --workspace` — 通過，20 項（16 單元 + 4 整合）
+- Build: `cargo build --release` — 通過
+- Run: `./target/release/gitview <repository 路徑> [--limit N]`
+- Build / package（桌面應用）: 待確認，Tauri 尚未導入
+- Benchmark（適用時）: 未定義。已有的實測數據記於 `docs/architecture.md`。
 
-在沒有 C 工具鏈的環境下測試純運算部分，需先設定：
-
-```sh
-LLD=$(ls ~/.rustup/toolchains/*/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld | head -1)
-export RUSTFLAGS="-C linker-flavor=ld.lld -C linker=$LLD -C link-self-contained=yes -C target-feature=+crt-static"
-```
-
-此設定僅為繞過環境限制，不是專案的正式建置方式；C 工具鏈就緒後應直接使用預設目標。
+整合測試會在系統暫存目錄自建 repository，不會接觸使用者既有的任何 repository。
 
 不得宣稱未實際執行的檢查已通過。無法在本機確認的外部服務、正式資料、部署、效能與安全結果，必須列為未驗證。
 

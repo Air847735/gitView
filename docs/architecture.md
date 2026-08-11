@@ -143,19 +143,41 @@
 
 ### Verification Status
 
-環境：Ubuntu 24.04.4 x86_64、Rust 1.97.1。本機無 C 編譯器，需 sudo 權限安裝。
+環境：Ubuntu 24.04.4 x86_64、Rust 1.97.1、gcc 13.3.0、31GB RAM、12 核心。
 
-- `cargo test -p gitview-core --no-default-features`（musl 目標）：`passed`，16 項
-  —— 涵蓋排序決定性、線道配置、空圖、單一 commit、多根節點、重複 oid、
-  缺漏父節點與環的偵測。
-- `cargo clippy -p gitview-core --no-default-features`（`-D warnings`）：`passed`
+- `cargo test --workspace`：`passed`，20 項
+  - 單元測試 16 項：排序決定性、線道配置、空圖、單一 commit、多根節點、
+    重複 oid、缺漏父節點、環的偵測。
+  - 整合測試 4 項：對自建暫存 repository 讀取線性歷史、分支與合併、
+    工作目錄狀態、空 repository。
+- `cargo clippy --workspace --all-targets`（`-D warnings`）：`passed`
 - `cargo fmt --check`：`passed`
-- `repo` 模組（git2 綁定）：`not run` —— libgit2 需要 C 編譯器建置。
-- 命令列工具：`not run` —— 同上。
-- 對真實 repository 的整合測試：`not run` —— 需先能建置 `repo` 模組。
+- 命令列工具對真實 repository 執行：`passed` —— 見下方實測。
 - 與 Sourcetree 的效能比較：`not run` —— 方法尚未定義。
+- 桌面應用程式（Tauri）：`not run` —— 尚未開始。
 
 不得把未實際執行的檢查記為通過。
+
+### 實測結果
+
+對 git 專案本身（85,224 commits、21,445 merges、1,006 refs，blobless clone）：
+
+| 項目 | 數值 |
+|---|---|
+| 讀取 + 佈局總耗時 | 1.13 秒 |
+| 峰值記憶體 | 233 MB |
+| 產生的線道數 | 282 |
+| 需要跨線道的邊 | 34,857 |
+
+**效能結論**：在遠超目標使用規模的資料上，單次完整佈局約 1 秒。目標情境
+（個人與小型團隊專案，數百至數千個 commit）不會構成效能問題。
+
+**可讀性結論**：同一份資料產生 282 條線道。git 的整合分支連續合併上百個
+topic 分支，每個合併的第二個父節點都會開一條線道並持續佔用，導致單列寬度
+超過一千個字元。這說明**單純的 commit 層級線道配置在大型 repository 上不可讀**，
+與演算法是否正確無關。目標使用規模不會觸及此問題，但若日後要支援大型
+repository，需要額外的機制（例如只佈局可見範圍、或將側分支收合），
+屆時應先量測再設計。命令列工具目前以繪製上限 12 條線道處理，超出的以計數表示。
 
 不得把未實際執行的檢查記為通過。
 

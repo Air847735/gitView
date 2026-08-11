@@ -48,15 +48,21 @@ pub fn load_graph(repo: &Repository) -> Result<CommitGraph> {
         };
         let parents = commit.parent_ids().map(|id| id.to_string()).collect();
         // 作者名稱與訊息可能不是 UTF-8：長期存在的 repository 一定會有這種資料。
-        // 以有損轉換取代，確保讀取不會因此失敗。
-        let author = commit.author();
-        let author = author
-            .name()
-            .map(str::to_owned)
-            .unwrap_or_else(|| String::from_utf8_lossy(commit.author().name_bytes()).into_owned());
-        let summary = commit.summary().map(str::to_owned).unwrap_or_else(|| {
-            String::from_utf8_lossy(commit.summary_bytes().unwrap_or(b"")).into_owned()
-        });
+        // git2 的這些存取子在非 UTF-8 時回傳 Err，改由位元組版本以有損轉換取代，
+        // 確保讀取不會因為個別 commit 的編碼而中止。
+        let signature = commit.author();
+        let author = match signature.name() {
+            Ok(name) => name.to_owned(),
+            Err(_) => String::from_utf8_lossy(signature.name_bytes()).into_owned(),
+        };
+        let summary = match commit.summary() {
+            Ok(Some(text)) => text.to_owned(),
+            // 沒有訊息的 commit 是合法的。
+            Ok(None) => String::new(),
+            Err(_) => {
+                String::from_utf8_lossy(commit.summary_bytes().unwrap_or_default()).into_owned()
+            }
+        };
 
         builder.push(
             oid.to_string(),
@@ -79,7 +85,11 @@ pub fn summarize(repo: &Repository, graph: &CommitGraph) -> Result<RepoSummary> 
         .into_owned();
 
     let branch = match repo.head() {
-        Ok(head) if head.is_branch() => head.shorthand().map(str::to_owned),
+        Ok(head) if head.is_branch() => Some(match head.shorthand() {
+            Ok(name) => name.to_owned(),
+            Err(_) => String::from_utf8_lossy(head.shorthand_bytes()).into_owned(),
+        }),
+        // detached HEAD、空 repository，或 HEAD 讀取失敗。
         _ => None,
     };
 

@@ -63,27 +63,35 @@ fn passing_lanes(layout: &Layout) -> Vec<Vec<bool>> {
         }
         let start = edge.child_row.min(edge.parent_row) + 1;
         let end = edge.child_row.max(edge.parent_row);
-        for row in start..end {
-            busy[row][lane] = true;
+        if start < end {
+            for row in &mut busy[start..end] {
+                row[lane] = true;
+            }
         }
     }
     busy
 }
 
+/// 文字輸出最多繪製的線道數。
+///
+/// 實際 repository 的線道數可以到數百條（git 專案的整合分支就有 282 條），
+/// 全部畫出來一列會超過上千個字元。超出的部分以計數表示。
+const MAX_RENDERED_LANES: usize = 12;
+
 fn render(graph: &CommitGraph, layout: &Layout, limit: usize) {
     let busy = passing_lanes(layout);
     let shown = limit.min(layout.rows());
+    let width = layout.lane_count.min(MAX_RENDERED_LANES);
 
-    for row in 0..shown {
-        let node = layout.order[row];
+    for (row_lanes, &node) in busy.iter().zip(layout.order.iter()).take(shown) {
         let lane = layout.lane_of[node];
         let commit = graph.commit(node);
 
         let mut track = String::new();
-        for column in 0..layout.lane_count {
+        for (column, &occupied) in row_lanes.iter().take(width).enumerate() {
             if column == lane {
                 track.push(if commit.is_merge() { '◍' } else { '●' });
-            } else if busy[row][column] {
+            } else if occupied {
                 track.push('│');
             } else {
                 track.push(' ');
@@ -91,11 +99,24 @@ fn render(graph: &CommitGraph, layout: &Layout, limit: usize) {
             track.push(' ');
         }
 
+        // 節點落在可繪製範圍之外時，以線道編號標示，避免它從畫面上消失。
+        let overflow = if lane >= width {
+            format!("→{lane:<3} ")
+        } else {
+            String::from("     ")
+        };
+
         let short_oid: String = commit.oid.chars().take(8).collect();
         let summary: String = commit.summary.chars().take(56).collect();
-        println!("{track} {short_oid}  {summary}");
+        println!("{track}{overflow}{short_oid}  {summary}");
     }
 
+    if layout.lane_count > width {
+        println!(
+            "（僅繪製前 {width} 條線道，另有 {} 條未繪製）",
+            layout.lane_count - width
+        );
+    }
     if layout.rows() > shown {
         println!("… 其餘 {} 個 commit 未顯示", layout.rows() - shown);
     }

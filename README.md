@@ -22,7 +22,7 @@
 
 ## Setup
 
-Rust 工具鏈已安裝（1.97.1）。其餘系統依賴尚缺，安裝需要管理者權限：
+需要 Rust 工具鏈（rustup）與下列系統套件：
 
 ```sh
 sudo apt-get install -y build-essential pkg-config libssl-dev cmake \
@@ -31,34 +31,29 @@ sudo apt-get install -y build-essential pkg-config libssl-dev cmake \
 ```
 
 `build-essential` 是必要的：`git2` 需要編譯 libgit2 的 C 原始碼。
+webkit2gtk 等套件供之後導入 Tauri 使用。
 
 ## Run
 
-```text
-待確認（預期為 cargo tauri dev）
+目前只有命令列工具。桌面應用程式尚未開始。
+
+```sh
+cargo build --release
+./target/release/gitview <repository 路徑> [--limit N]
 ```
 
-命令列工具 `gitview` 已實作但尚未建置，同樣受限於缺少 C 編譯器。
+它會讀出指定 repository 的 commit 圖並以文字呈現分支走向。只讀取，不做任何修改。
 
 ## Verify
 
 ```sh
 cargo fmt --check
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-上列指令需要 C 編譯器。在尚未安裝的環境下，可單獨驗證不含 git 綁定的
-純運算部分（`gitview-core` 的 `dag` 與 `layout`）：
-
-```sh
-LLD=$(ls ~/.rustup/toolchains/*/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld | head -1)
-export RUSTFLAGS="-C linker-flavor=ld.lld -C linker=$LLD -C link-self-contained=yes -C target-feature=+crt-static"
-cargo test -p gitview-core --no-default-features --target x86_64-unknown-linux-musl
-```
-
-目前狀態：純運算部分 16 項單元測試通過，clippy 與 fmt 通過。
-需要 C 編譯器的部分（`repo` 模組與命令列工具）尚未建置或測試。
+目前狀態：20 項測試通過（16 項單元測試涵蓋排序與線道配置，
+4 項整合測試對自建的暫存 repository 執行）；clippy 與 fmt 通過。
 
 ## Usage
 
