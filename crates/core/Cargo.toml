@@ -1,0 +1,11 @@
+[package]
+name = "gitview-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Git 資料讀取與圖形佈局計算，不含任何介面相依。"
+
+[dependencies]
+anyhow.workspace = true
+git2.workspace = true

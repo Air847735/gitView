@@ -1,0 +1,16 @@
+[package]
+name = "gitview-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gitview 的命令列工具，用於在建立圖形介面之前驗證核心運算。"
+
+[[bin]]
+name = "gitview"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+git2.workspace = true
+gitview-core.workspace = true
