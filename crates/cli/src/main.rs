@@ -27,9 +27,7 @@ fn parse_args(args: &[String]) -> Result<Options> {
         match args[index].as_str() {
             "--limit" | "-n" => {
                 index += 1;
-                let value = args
-                    .get(index)
-                    .context("--limit 後面需要一個數字")?;
+                let value = args.get(index).context("--limit 後面需要一個數字")?;
                 limit = value
                     .parse()
                     .with_context(|| format!("--limit 的值不是有效數字：{value}"))?;

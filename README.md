@@ -22,16 +22,15 @@
 
 ## Setup
 
-開發環境尚未建立。以下項目在本機（Ubuntu 24.04）皆未安裝：
+Rust 工具鏈已安裝（1.97.1）。其餘系統依賴尚缺，安裝需要管理者權限：
 
-- Rust 工具鏈（rustup / cargo / rustc）
-- Node.js 與 npm
-- C 編譯器與建置工具（gcc、g++、make）
-- Tauri 的 Linux 系統依賴（webkit2gtk-4.1、libsoup-3.0、gtk+-3.0 等）
-
-```text
-待確認
+```sh
+sudo apt-get install -y build-essential pkg-config libssl-dev cmake \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+    librsvg2-dev file wget nodejs npm
 ```
+
+`build-essential` 是必要的：`git2` 需要編譯 libgit2 的 C 原始碼。
 
 ## Run
 
@@ -39,11 +38,27 @@
 待確認（預期為 cargo tauri dev）
 ```
 
+命令列工具 `gitview` 已實作但尚未建置，同樣受限於缺少 C 編譯器。
+
 ## Verify
 
-```text
-待確認（預期為 cargo test、cargo fmt、cargo clippy）
+```sh
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 ```
+
+上列指令需要 C 編譯器。在尚未安裝的環境下，可單獨驗證不含 git 綁定的
+純運算部分（`gitview-core` 的 `dag` 與 `layout`）：
+
+```sh
+LLD=$(ls ~/.rustup/toolchains/*/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld | head -1)
+export RUSTFLAGS="-C linker-flavor=ld.lld -C linker=$LLD -C link-self-contained=yes -C target-feature=+crt-static"
+cargo test -p gitview-core --no-default-features --target x86_64-unknown-linux-musl
+```
+
+目前狀態：純運算部分 16 項單元測試通過，clippy 與 fmt 通過。
+需要 C 編譯器的部分（`repo` 模組與命令列工具）尚未建置或測試。
 
 ## Usage
 

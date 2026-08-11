@@ -20,15 +20,27 @@
 
 # Commands and Verification
 
-開發環境尚未安裝（Rust 工具鏈、Node.js、C 編譯器、Tauri 的 Linux 系統依賴皆缺）。以下指令在環境建立並確認可執行前，一律視為未驗證。
+Rust 工具鏈已安裝（1.97.1）。本機**尚未安裝 C 編譯器**（gcc 缺，需 sudo），
+因此需要編譯 C 的部分（`git2` → libgit2）無法建置。
 
-- Install / setup: 待確認（需先安裝 rustup、Node.js、build-essential 及 Tauri Linux 依賴）
+- Install / setup: rustup 已裝。尚缺：`build-essential`、`libssl-dev`、`cmake`、
+  Tauri 的 Linux 依賴、Node.js。安裝需 sudo 權限。
+- Format: `cargo fmt` — 已執行，通過
+- Lint: `cargo clippy -p gitview-core --no-default-features --target x86_64-unknown-linux-musl -- -D warnings` — 已執行，通過
+- Unit test（純運算部分）: `cargo test -p gitview-core --no-default-features --target x86_64-unknown-linux-musl` — 已執行，16 項通過
+- Unit test（完整）: 待確認，需 C 編譯器
 - Run / develop: 待確認（預期為 `cargo tauri dev`）
-- Format / lint: 待確認（預期為 `cargo fmt`、`cargo clippy`）
-- Type / static check: 由 `cargo check` 涵蓋，待確認
-- Unit / integration test: 待確認（預期為 `cargo test`）
 - Build / package: 待確認（預期為 `cargo tauri build`）
 - Benchmark（適用時）: 未定義
+
+在沒有 C 工具鏈的環境下測試純運算部分，需先設定：
+
+```sh
+LLD=$(ls ~/.rustup/toolchains/*/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld | head -1)
+export RUSTFLAGS="-C linker-flavor=ld.lld -C linker=$LLD -C link-self-contained=yes -C target-feature=+crt-static"
+```
+
+此設定僅為繞過環境限制，不是專案的正式建置方式；C 工具鏈就緒後應直接使用預設目標。
 
 不得宣稱未實際執行的檢查已通過。無法在本機確認的外部服務、正式資料、部署、效能與安全結果，必須列為未驗證。
 

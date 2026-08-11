@@ -5,11 +5,13 @@
 
 pub mod dag;
 pub mod layout;
+#[cfg(feature = "git")]
 pub mod repo;
 
 pub use dag::{Commit, CommitGraph, CommitGraphBuilder, NodeIndex};
-pub use layout::{assign_lanes, lay_out, topo_time_order, Edge, Layout};
-pub use repo::{load_graph, RepoSummary};
+pub use layout::{assign_lanes, lay_out, topo_time_order, Edge, Layout, LayoutError};
+#[cfg(feature = "git")]
+pub use repo::{load_graph, summarize, RepoSummary};
 
 #[cfg(test)]
 pub(crate) mod testutil {

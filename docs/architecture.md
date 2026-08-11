@@ -143,7 +143,19 @@
 
 ### Verification Status
 
-- 全部項目：`not run`。專案尚無實作，開發環境尚未安裝。
+環境：Ubuntu 24.04.4 x86_64、Rust 1.97.1。本機無 C 編譯器，需 sudo 權限安裝。
+
+- `cargo test -p gitview-core --no-default-features`（musl 目標）：`passed`，16 項
+  —— 涵蓋排序決定性、線道配置、空圖、單一 commit、多根節點、重複 oid、
+  缺漏父節點與環的偵測。
+- `cargo clippy -p gitview-core --no-default-features`（`-D warnings`）：`passed`
+- `cargo fmt --check`：`passed`
+- `repo` 模組（git2 綁定）：`not run` —— libgit2 需要 C 編譯器建置。
+- 命令列工具：`not run` —— 同上。
+- 對真實 repository 的整合測試：`not run` —— 需先能建置 `repo` 模組。
+- 與 Sourcetree 的效能比較：`not run` —— 方法尚未定義。
+
+不得把未實際執行的檢查記為通過。
 
 不得把未實際執行的檢查記為通過。
 

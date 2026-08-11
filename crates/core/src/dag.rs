@@ -166,9 +166,8 @@ impl CommitGraphBuilder {
         }
 
         let mut children = vec![Vec::new(); commits.len()];
-        for index in 0..commits.len() {
-            for position in 0..commits[index].parents.len() {
-                let parent = commits[index].parents[position];
+        for (index, commit) in commits.iter().enumerate() {
+            for &parent in &commit.parents {
                 children[parent].push(index);
             }
         }

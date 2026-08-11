@@ -5,10 +5,35 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-
-use anyhow::{bail, Result};
+use std::fmt;
 
 use crate::dag::{CommitGraph, NodeIndex};
+
+/// 佈局失敗的原因。
+///
+/// 使用具型別的錯誤而非 `anyhow`，讓本模組不帶任何相依，
+/// 呼叫端也能針對個別情況處理。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutError {
+    /// 圖中含有環，或父子關係不一致，無法排出完整順序。
+    Cyclic { ordered: usize, total: usize },
+}
+
+impl fmt::Display for LayoutError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LayoutError::Cyclic { ordered, total } => write!(
+                formatter,
+                "commit 圖含有環或資料不一致：排入 {ordered} 個節點，實際有 {total} 個"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LayoutError {}
+
+/// 本模組的結果型別。
+pub type Result<T> = std::result::Result<T, LayoutError>;
 
 /// 一條從子節點（上方）連到父節點（下方）的線。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,15 +98,13 @@ pub fn topo_time_order(graph: &CommitGraph) -> Result<Vec<NodeIndex>> {
     }
 
     // 最大堆：時間大者優先；時間相同時 Reverse(oid) 大者優先，即 oid 小者優先。
+    // 堆中借用 graph 內的 oid，因此不抽成閉包 —— 閉包參數的生命週期會被推斷為
+    // 'static，使借用逃逸出函式。
     let mut heap: BinaryHeap<(i64, Reverse<&str>, NodeIndex)> = BinaryHeap::new();
-    let push = |heap: &mut BinaryHeap<(i64, Reverse<&str>, NodeIndex)>, node: NodeIndex| {
-        let commit = graph.commit(node);
-        heap.push((commit.timestamp, Reverse(commit.oid.as_str()), node));
-    };
-
     for node in graph.indices() {
         if pending_children[node] == 0 {
-            push(&mut heap, node);
+            let commit = graph.commit(node);
+            heap.push((commit.timestamp, Reverse(commit.oid.as_str()), node));
         }
     }
 
@@ -91,17 +114,17 @@ pub fn topo_time_order(graph: &CommitGraph) -> Result<Vec<NodeIndex>> {
         for &parent in graph.parents(node) {
             pending_children[parent] -= 1;
             if pending_children[parent] == 0 {
-                push(&mut heap, parent);
+                let commit = graph.commit(parent);
+                heap.push((commit.timestamp, Reverse(commit.oid.as_str()), parent));
             }
         }
     }
 
     if order.len() != total {
-        bail!(
-            "commit 圖含有環或資料不一致：排入 {} 個節點，實際有 {} 個",
-            order.len(),
-            total
-        );
+        return Err(LayoutError::Cyclic {
+            ordered: order.len(),
+            total,
+        });
     }
     Ok(order)
 }
@@ -145,6 +168,9 @@ pub fn assign_lanes(graph: &CommitGraph, order: &[NodeIndex]) -> Layout {
         active[lane] = None;
         row_of[node] = row;
         lane_of[node] = lane;
+        // 節點本身就佔用寬度：線道可能在同一列結束並被回收，
+        // 只看使用中的線道數會低估繪製寬度。
+        lane_count = lane_count.max(lane + 1);
 
         for (position, &parent) in graph.parents(node).iter().enumerate() {
             if row_of[parent] != Layout::UNPLACED {
@@ -153,7 +179,7 @@ pub fn assign_lanes(graph: &CommitGraph, order: &[NodeIndex]) -> Layout {
             }
             if position == 0 {
                 active[lane] = Some(parent);
-            } else if !active.iter().any(|slot| *slot == Some(parent)) {
+            } else if !active.contains(&Some(parent)) {
                 let extra = claim_lane(&mut active, parent);
                 active[extra] = Some(parent);
             }
@@ -211,10 +237,7 @@ mod tests {
         ]);
         let layout = lay_out(&graph).unwrap();
         for edge in &layout.edges {
-            assert!(
-                edge.child_row < edge.parent_row,
-                "邊必須由上往下：{edge:?}"
-            );
+            assert!(edge.child_row < edge.parent_row, "邊必須由上往下：{edge:?}");
         }
     }
 
@@ -272,7 +295,10 @@ mod tests {
         let m = graph.index_of("m").unwrap();
         let a = graph.index_of("a").unwrap();
         let f = graph.index_of("f").unwrap();
-        assert_eq!(layout.lane_of[m], layout.lane_of[a], "第一個父節點應沿用線道");
+        assert_eq!(
+            layout.lane_of[m], layout.lane_of[a],
+            "第一個父節點應沿用線道"
+        );
         assert_ne!(layout.lane_of[m], layout.lane_of[f], "其餘父節點應另配線道");
     }
 

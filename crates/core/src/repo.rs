@@ -28,10 +28,9 @@ pub struct RepoSummary {
 ///
 /// 走訪順序不影響結果：佈局階段會自行排序，此處只負責把資料讀進來。
 pub fn load_graph(repo: &Repository) -> Result<CommitGraph> {
-    let mut walk = repo
-        .revwalk()
-        .context("無法建立 revwalk")?;
-    walk.push_glob("refs/*").context("無法將 refs 加入走訪範圍")?;
+    let mut walk = repo.revwalk().context("無法建立 revwalk")?;
+    walk.push_glob("refs/*")
+        .context("無法將 refs 加入走訪範圍")?;
     // HEAD 可能指向未被任何 ref 涵蓋的位置（detached HEAD）。
     if repo.head().is_ok() {
         walk.push_head().context("無法將 HEAD 加入走訪範圍")?;
@@ -55,10 +54,9 @@ pub fn load_graph(repo: &Repository) -> Result<CommitGraph> {
             .name()
             .map(str::to_owned)
             .unwrap_or_else(|| String::from_utf8_lossy(commit.author().name_bytes()).into_owned());
-        let summary = commit
-            .summary()
-            .map(str::to_owned)
-            .unwrap_or_else(|| String::from_utf8_lossy(commit.summary_bytes().unwrap_or(b"")).into_owned());
+        let summary = commit.summary().map(str::to_owned).unwrap_or_else(|| {
+            String::from_utf8_lossy(commit.summary_bytes().unwrap_or(b"")).into_owned()
+        });
 
         builder.push(
             oid.to_string(),
