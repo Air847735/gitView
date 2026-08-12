@@ -335,3 +335,135 @@ mod tests {
         assert_eq!(dto.error.as_deref(), Some("不存在"));
     }
 }
+
+/// 操作結果。
+#[derive(Debug, Clone, Serialize)]
+pub struct OpOutcomeDto {
+    pub message: String,
+    /// 可還原時為還原點的 ref 名稱。
+    pub undo_ref: Option<String>,
+}
+
+impl From<gitview_core::ops::OpOutcome> for OpOutcomeDto {
+    fn from(outcome: gitview_core::ops::OpOutcome) -> Self {
+        Self {
+            message: outcome.message,
+            undo_ref: outcome.undo.map(|point| point.reference),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafetyPointDto {
+    pub reference: String,
+    pub oid: String,
+    pub operation: String,
+    pub created_unix: u64,
+}
+
+impl From<&gitview_core::ops::SafetyPoint> for SafetyPointDto {
+    fn from(point: &gitview_core::ops::SafetyPoint) -> Self {
+        Self {
+            reference: point.reference.clone(),
+            oid: point.oid.clone(),
+            operation: point.operation.clone(),
+            created_unix: point.created_unix,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChangeDto {
+    pub path: String,
+    pub staged: String,
+    pub unstaged: String,
+    pub is_untracked: bool,
+    pub is_conflicted: bool,
+}
+
+impl From<&gitview_core::workspace::FileChange> for FileChangeDto {
+    fn from(change: &gitview_core::workspace::FileChange) -> Self {
+        Self {
+            path: change.path.clone(),
+            staged: change.staged.to_owned(),
+            unstaged: change.unstaged.to_owned(),
+            is_untracked: change.is_untracked,
+            is_conflicted: change.is_conflicted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchDto {
+    pub name: String,
+    pub is_head: bool,
+    pub is_remote: bool,
+    pub upstream: Option<String>,
+}
+
+impl From<&gitview_core::workspace::BranchInfo> for BranchDto {
+    fn from(branch: &gitview_core::workspace::BranchInfo) -> Self {
+        Self {
+            name: branch.name.clone(),
+            is_head: branch.is_head,
+            is_remote: branch.is_remote,
+            upstream: branch.upstream.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StashDto {
+    pub index: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConflictSideDto {
+    pub text: Option<String>,
+    pub exists: bool,
+}
+
+impl From<&gitview_core::conflict::ConflictSide> for ConflictSideDto {
+    fn from(side: &gitview_core::conflict::ConflictSide) -> Self {
+        Self {
+            text: side.text.clone(),
+            exists: side.exists,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConflictFileDto {
+    pub path: String,
+    pub base: ConflictSideDto,
+    pub ours: ConflictSideDto,
+    pub theirs: ConflictSideDto,
+    pub merged: Option<String>,
+    pub is_binary: bool,
+}
+
+impl From<&gitview_core::conflict::ConflictFile> for ConflictFileDto {
+    fn from(file: &gitview_core::conflict::ConflictFile) -> Self {
+        Self {
+            path: file.path.clone(),
+            base: ConflictSideDto::from(&file.base),
+            ours: ConflictSideDto::from(&file.ours),
+            theirs: ConflictSideDto::from(&file.theirs),
+            merged: file.merged.clone(),
+            is_binary: file.is_binary,
+        }
+    }
+}
+
+/// 單一 repository 的工作區狀態，一次取回介面需要的全部資料。
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceDto {
+    pub changes: Vec<FileChangeDto>,
+    pub branches: Vec<BranchDto>,
+    pub stashes: Vec<StashDto>,
+    pub conflicts: Vec<ConflictFileDto>,
+    /// 進行中的操作名稱，例如 `rebase 中`；沒有時為 `null`。
+    pub operation: Option<String>,
+    pub undo_points: Vec<SafetyPointDto>,
+}

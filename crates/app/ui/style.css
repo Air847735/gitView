@@ -362,3 +362,199 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   font-size: 0.85rem;
   margin-bottom: 1rem;
 }
+
+/* ---- 操作按鈕列 ---- */
+.action-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1.1rem;
+}
+.action-bar .spacer { margin-left: auto; }
+.action-note {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  flex-basis: 100%;
+}
+
+/* ---- 衝突 ---- */
+.conflict-banner {
+  border: 1px solid var(--attention);
+  border-left: 3px solid var(--attention);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.conflict-banner strong { color: var(--attention); }
+
+.conflict-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.conflict-files {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.conflict-files button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-left: 3px solid transparent;
+  background: transparent;
+  padding: 0.5rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conflict-files button.selected {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.conflict-files button.resolved { color: var(--ink-soft); }
+
+.side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.side-pane {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.side-pane h4 {
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+.side-pane pre {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.merged-editor {
+  width: 100%;
+  min-height: 220px;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  resize: vertical;
+}
+
+/* ---- 變更與提交 ---- */
+.workspace-bar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.workspace-bar select, .workspace-bar input {
+  font: inherit;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.change-list {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  margin-bottom: 0.9rem;
+}
+.change-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.7rem;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--mono);
+  font-size: 0.77rem;
+}
+.change-row:last-child { border-bottom: 0; }
+.change-row .path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-row .kind {
+  font-size: 0.68rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  flex-shrink: 0;
+}
+.kind.new { color: var(--incoming); }
+.kind.modified { color: var(--unpushed); }
+.kind.deleted { color: var(--diverged); }
+.kind.renamed { color: var(--uncommitted); }
+.kind.conflict { color: var(--attention); }
+.change-row button { padding: 0.1rem 0.45rem; font-size: 0.72rem; }
+
+.commit-box { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.2rem; }
+.commit-box textarea {
+  min-height: 76px;
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  resize: vertical;
+}
+.commit-actions { display: flex; gap: 0.5rem; align-items: center; }
+.commit-actions label { font-size: 0.82rem; display: flex; align-items: center; gap: 0.3rem; }
+
+/* ---- 確認對話框 ---- */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.confirm-box {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.2rem 1.3rem;
+  max-width: 30rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.confirm-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.confirm-box p { margin: 0 0 1rem; color: var(--ink-mid); font-size: 0.9rem; }
+.confirm-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }

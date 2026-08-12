@@ -7,25 +7,37 @@ pub mod dag;
 pub mod layout;
 
 #[cfg(feature = "git")]
+pub mod conflict;
+#[cfg(feature = "git")]
 pub mod divergence;
 #[cfg(feature = "git")]
 pub mod fetch;
 #[cfg(feature = "git")]
+pub mod ops;
+#[cfg(feature = "git")]
 pub mod repo;
 #[cfg(feature = "git")]
 pub mod status;
+#[cfg(feature = "git")]
+pub mod workspace;
 
 pub use dag::{Commit, CommitGraph, CommitGraphBuilder, NodeIndex};
 pub use layout::{assign_lanes, lay_out, topo_time_order, Edge, Layout, LayoutError};
 
 #[cfg(feature = "git")]
+pub use conflict::{ConflictFile, ConflictSide, Side};
+#[cfg(feature = "git")]
 pub use divergence::{analyse, ConflictRisk, Divergence, Recommendation};
 #[cfg(feature = "git")]
 pub use fetch::{default_remote, fetch, FetchFailure, FetchReport};
 #[cfg(feature = "git")]
+pub use ops::{OpOutcome, SafetyPoint};
+#[cfg(feature = "git")]
 pub use repo::{load_graph, ref_labels, summarize, RepoSummary};
 #[cfg(feature = "git")]
 pub use status::{status, Attention, RepoStatus, WorkingTree};
+#[cfg(feature = "git")]
+pub use workspace::{BranchInfo, FileChange, StashEntry};
 
 #[cfg(test)]
 pub(crate) mod testutil {

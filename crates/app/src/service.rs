@@ -11,9 +11,14 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
-use gitview_core::{divergence, fetch, lay_out, repo as core_repo, status};
+use gitview_core::{
+    conflict, divergence, fetch, lay_out, ops, repo as core_repo, status, workspace,
+};
 
-use crate::dto::{DivergenceDto, FetchStateDto, GraphDto, RepoStatusDto};
+use crate::dto::{
+    BranchDto, ConflictFileDto, DivergenceDto, FetchStateDto, FileChangeDto, GraphDto,
+    OpOutcomeDto, RepoStatusDto, SafetyPointDto, StashDto, WorkspaceDto,
+};
 use crate::settings::{self, Settings};
 
 /// 單一 repository 歷史圖預設載入的列數。
@@ -217,6 +222,157 @@ pub fn fetch_repo(state: &AppState, path: &str) -> RepoStatusDto {
 
     state.record_fetch_state(path, fetch_state);
     status_of(state, path)
+}
+
+/// 還原點的保留數量。超過的會在每次建立新還原點後自動清除。
+///
+/// 還原點會讓被丟棄的 commit 無法被回收，不設上限會無限累積。
+pub const KEEP_UNDO_POINTS: usize = 20;
+
+fn open_mut(path: &str) -> Result<Repository, String> {
+    open(path)
+}
+
+/// 一次取回單一 repository 的工作區狀態。
+pub fn workspace_of(path: &str) -> Result<WorkspaceDto, String> {
+    let mut repository = open_mut(path)?;
+
+    let changes = workspace::changes(&repository)
+        .map_err(|error| format!("{error:#}"))?
+        .iter()
+        .map(FileChangeDto::from)
+        .collect();
+    let branches = workspace::branches(&repository)
+        .map_err(|error| format!("{error:#}"))?
+        .iter()
+        .map(BranchDto::from)
+        .collect();
+    let conflicts = conflict::conflicts(&repository)
+        .map_err(|error| format!("{error:#}"))?
+        .iter()
+        .map(ConflictFileDto::from)
+        .collect();
+    let undo_points = ops::list_safety_points(&repository)
+        .map_err(|error| format!("{error:#}"))?
+        .iter()
+        .map(SafetyPointDto::from)
+        .collect();
+    let operation = status::status(&repository)
+        .map_err(|error| format!("{error:#}"))?
+        .operation;
+    let stashes = workspace::stashes(&mut repository)
+        .map_err(|error| format!("{error:#}"))?
+        .into_iter()
+        .map(|entry| StashDto {
+            index: entry.index,
+            message: entry.message,
+        })
+        .collect();
+
+    Ok(WorkspaceDto {
+        changes,
+        branches,
+        stashes,
+        conflicts,
+        operation,
+        undo_points,
+    })
+}
+
+/// 執行一個會改動 repository 的操作。
+///
+/// 所有這類操作都經由這裡，統一在成功後清理過舊的還原點。
+fn run_op<F>(path: &str, action: F) -> Result<OpOutcomeDto, String>
+where
+    F: FnOnce(&mut Repository) -> anyhow::Result<gitview_core::ops::OpOutcome>,
+{
+    let mut repository = open_mut(path)?;
+    let outcome = action(&mut repository).map_err(|error| format!("{error:#}"))?;
+    let _ = ops::prune_safety_points(&repository, KEEP_UNDO_POINTS);
+    Ok(OpOutcomeDto::from(outcome))
+}
+
+pub fn fast_forward(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| ops::fast_forward(repo))
+}
+
+pub fn rebase(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| ops::rebase_onto_upstream(repo))
+}
+
+pub fn merge(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| ops::merge_upstream(repo))
+}
+
+pub fn push(path: &str, force: bool) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| ops::push(repo, force))
+}
+
+pub fn abort(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| ops::abort_operation(repo))
+}
+
+pub fn undo(path: &str, reference: &str) -> Result<OpOutcomeDto, String> {
+    let reference = reference.to_owned();
+    run_op(path, move |repo| ops::undo_to(repo, &reference))
+}
+
+pub fn stage(path: &str, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::stage(repo, &paths))
+}
+
+pub fn unstage(path: &str, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::unstage(repo, &paths))
+}
+
+pub fn commit(path: &str, message: String, amend: bool) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::commit(repo, &message, amend))
+}
+
+pub fn discard(path: &str, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::discard(repo, &paths))
+}
+
+pub fn checkout_branch(path: &str, name: String) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::checkout_branch(repo, &name))
+}
+
+pub fn create_branch(path: &str, name: String) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::create_branch(repo, &name))
+}
+
+pub fn stash_save(path: &str, message: String) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::stash_save(repo, &message))
+}
+
+pub fn stash_pop(path: &str, index: usize) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::stash_pop(repo, index))
+}
+
+pub fn stash_drop(path: &str, index: usize) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::stash_drop(repo, index))
+}
+
+pub fn resolve_conflict(
+    path: &str,
+    file: String,
+    side: Option<String>,
+    content: Option<String>,
+) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| match (side.as_deref(), content) {
+        (Some("ours"), _) => conflict::resolve_using(repo, &file, conflict::Side::Ours),
+        (Some("theirs"), _) => conflict::resolve_using(repo, &file, conflict::Side::Theirs),
+        (_, Some(text)) => conflict::resolve_with_content(repo, &file, &text),
+        _ => anyhow::bail!("必須指定採用哪一方，或提供合併後的內容"),
+    })
+}
+
+pub fn continue_operation(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| conflict::continue_operation(repo))
+}
+
+pub fn skip_step(path: &str) -> Result<OpOutcomeDto, String> {
+    run_op(path, |repo| conflict::skip_current_step(repo))
 }
 
 #[cfg(test)]

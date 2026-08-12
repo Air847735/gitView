@@ -2,7 +2,7 @@
 
 本文件回答「如何實作與驗證」，保存目前採用的系統設計、演算法、測試方法與重要取捨。需求與成功標準以 `spec.md` 為準。
 
-**目前狀態：核心功能已實作並通過測試。** 尚未實作的是基本 Git 操作（提交、分支、stash、衝突解決等），清單見 `spec.md`。
+**目前狀態：核心功能與基本 Git 操作皆已實作並通過測試**，包含分岔的實際處置與衝突解決。尚未實作的項目見 `spec.md` 的基本功能清單與本文件的 Known Gaps。
 
 ## Overview
 
@@ -11,7 +11,10 @@
 - Data / external boundary：
   - 讀取：本機檔案系統上的 Git repository（object database、refs、工作目錄狀態）。
   - 網路：透過 SSH 對遠端 git 主機執行 fetch。認證委由系統既有的 SSH agent，應用程式不持有金鑰。
-  - 寫入：使用者設定檔（JSON，位於系統設定目錄）；以及 fetch 對遠端追蹤分支的更新。目前不執行任何會改動本機分支或工作目錄的操作。
+  - 寫入：使用者設定檔（JSON，位於系統設定目錄）；fetch 對遠端追蹤分支的更新；
+    以及經使用者確認後對 repository 執行的操作（提交、暫存、分支、stash、
+    快轉、rebase、merge、推送、衝突解決）。會改寫歷史或移動分支的操作一律
+    先建立還原點。
 
 ## Repository Map
 
@@ -21,6 +24,10 @@
 - `crates/core/src/status.rs`：狀態彙整與需要注意的程度分級。
 - `crates/core/src/divergence.rs`：分岔分析與建議。
 - `crates/core/src/fetch.rs`：fetch 與認證，錯誤分類為認證／網路／其他。
+- `crates/core/src/ops.rs`：會改動 repository 的同步操作（快轉、rebase、merge、
+  推送、中止），以及還原點的建立、列出、還原與清理。
+- `crates/core/src/workspace.rs`：暫存、提交、分支、stash、丟棄。
+- `crates/core/src/conflict.rs`：衝突的檢視與解決，以及解決後的繼續與略過。
 - `crates/app/src/service.rs`：應用程式狀態與各項操作，指令與背景排程共用。
 - `crates/app/src/commands.rs`：前端可呼叫的指令。
 - `crates/app/src/watcher.rs`：背景排程與通知規則。
@@ -155,13 +162,18 @@ cargo test --workspace
 
 環境：Ubuntu 24.04.4 x86_64、Rust 1.97.1、gcc 13.3.0、31GB RAM、12 核心。
 
-- `cargo test --workspace`：`passed`，72 項
-  - core 單元測試 34 項：排序決定性、線道配置、空圖、單一 commit、多根節點、
-    重複 oid、缺漏父節點、環的偵測、狀態分級、分岔建議、fetch 錯誤分類。
-  - core 整合測試 10 項：對自建暫存 repository 驗證讀取、分支與合併、
-    工作目錄計數，以及以本機裸 repository 模擬遠端後的完整分岔情境
-    （檔案不重疊、檔案重疊、未提交變更受影響、無追蹤分支）。
-  - app 單元測試 17 項：設定正規化與往返、通知的重複抑制、排序規則。
+- `cargo test --workspace`：`passed`，93 項
+  - core 單元測試：排序決定性、線道配置、空圖、單一 commit、多根節點、
+    重複 oid、缺漏父節點、環的偵測、狀態分級、分岔建議、fetch 錯誤分類、
+    工作區狀態標籤。
+  - core 整合測試（讀取）10 項：自建暫存 repository 的讀取、分支與合併、
+    工作目錄計數，以及以本機裸 repository 模擬遠端的完整分岔情境。
+  - core 整合測試（操作）16 項：快轉成功與被拒絕的兩種前置條件、rebase 產生
+    線性歷史且可還原、merge 產生合併節點、還原點的列出與清理、還原拒絕
+    命名空間外的 ref、**實際製造衝突後的完整流程**（停在衝突、列出雙方內容、
+    整檔擇一、以編輯內容解決、繼續、中止）、暫存與提交與取消暫存、
+    空訊息被拒、分支建立與切換、stash 往返、丟棄變更。
+  - app 單元測試：設定正規化與往返、通知的重複抑制、排序規則。
   - app 整合測試 11 項：加入與移除 repository、設定持久化、路徑消失的處理、
     排序、圖形資料與截斷、分岔資料。
 - `cargo clippy --workspace --all-targets`（`-D warnings`）：`passed`
@@ -169,6 +181,9 @@ cargo test --workspace
 - `cargo build --release`：`passed`
 - 命令列工具對真實 repository 執行：`passed` —— 見下方實測。
 - 桌面應用程式啟動：`passed` —— 視窗可開啟、程序穩定執行。
+- 前端語法檢查（`node --check`）：`passed`。
+- 操作類指令的介面互動：`not run` —— 受限於下方的繪製問題，按鈕未經人工點擊
+  驗證。其後端邏輯已由 16 項操作整合測試涵蓋。
 - **桌面介面的繪製：`not run`** —— 見下方「介面繪製的診斷結果」。已確認為
   環境限制，非程式缺陷。需在實體桌面環境確認。
 - 背景 fetch 對真實遠端執行：`not run` —— 本機無 SSH 私鑰，且不應在未經
@@ -233,6 +248,42 @@ repository，需要額外的機制（例如只佈局可見範圍、或將側分�
 
 ## Design Decisions and Trade-offs
 
+### 以還原點取代 reflog 檢視作為復原機制
+
+- Status：accepted
+- Context：任何會改寫歷史或移動分支的操作都可能讓使用者失去工作成果。
+  git 本身有 reflog，但要求使用者理解它、找到正確的項目、再自行 reset。
+- Decision：在每次危險操作前，於 `refs/gitview/undo/` 建立一個指向當時 HEAD
+  的 ref，並在介面提供一鍵還原。保留最近 20 個，超過的在下次操作後自動清除。
+- Alternatives：呈現 reflog 讓使用者自行選擇；完全依賴 git 既有機制。
+- Consequences：使用者不需要理解 reflog 就能反悔。放在 `refs/gitview/` 而非
+  `refs/heads/`，因此不會出現在分支清單，也不會被推送。代價是被丟棄的 commit
+  在還原點存在期間不會被回收，所以必須設保留上限。
+
+### 前置條件不符時拒絕，而非自動處理
+
+- Status：accepted
+- Context：工作目錄有未提交的變更時執行 rebase 或 merge 會失敗或造成混亂。
+  常見做法是自動暫存、操作完再放回。
+- Decision：直接拒絕並說明原因，同時在介面上提供一顆「先暫存起來」的按鈕，
+  由使用者明確決定。
+- Alternatives：自動暫存並自動還原。
+- Consequences：多一次點擊，但少一個會出錯的隱藏環節 —— 自動還原若失敗，
+  使用者的變更會停在一個他不知情的 stash 裡。這類「幫使用者做決定」的便利
+  在出錯時的代價，高於它節省的一次點擊。
+
+### 衝突解決做在應用程式內，但不做逐區塊挑選
+
+- Status：accepted
+- Context：rebase 與 merge 撞到衝突是常態。若把使用者丟回終端機，
+  「不必離開這個工具」的價值就消失了。但完整的三方合併編輯器（逐區塊挑選、
+  行內差異標示）工作量極大。
+- Decision：提供衝突解決畫面，內容為：雙方版本並列顯示、整檔採用其中一方、
+  以及直接編輯含衝突標記的合併結果。逐區塊挑選由使用者在編輯區完成。
+- Alternatives：完整的三方合併編輯器；只在確定不會衝突時才允許操作。
+- Consequences：涵蓋實際會遇到的情況且工作量可控。逐區塊挑選的效率不如
+  專用編輯器，日後可在同一個畫面上疊加而不需改動核心介面。
+
 ### 介面層的四個取捨
 
 **前端不使用框架與打包工具。** 這個介面是一份儀表板加一張圖，框架帶來的
@@ -289,9 +340,9 @@ repository，需要額外的機制（例如只佈局可見範圍、或將側分�
   stash 或解衝突。清單與分級見 `spec.md` 的「基本功能清單」。
 - **桌面介面的繪製未經目視驗證。** 開發環境無法繪製 WebKitGTK 內容，
   已確認為環境限制。需在實體桌面環境確認。
-- **分岔處置只有預覽，沒有執行。** 介面會畫出 rebase 與 merge 的結果並給建議，
-  但不會替使用者執行，也還沒有對應的復原路徑。這是刻意的順序：
-  會改寫歷史的操作要等預覽本身被確認可信之後再做。
+- 逐區塊挑選衝突內容尚未提供，目前以編輯合併結果代替。
+- 差異呈現（並排／行內）、hunk 層級暫存、分支刪除與重新命名尚未實作。
+- 互動式 rebase（調整順序、squash 等）尚未實作。
 - 背景 fetch 未對真實遠端驗證（本機無 SSH 私鑰）。
 - Windows 建置途徑未確認，需實體 Windows 環境或 CI。
 - 與 Sourcetree 的效能比較方法未定義。

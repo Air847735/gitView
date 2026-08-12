@@ -34,6 +34,8 @@ const state = {
   repos: [],
   selected: null,
   tab: "divergence",
+  workspace: null,
+  selectedConflict: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -269,6 +271,9 @@ function renderDivergence(data) {
   verdict.append(title, detail);
   panel.appendChild(verdict);
 
+  const actions = syncActions(data);
+  if (actions) panel.appendChild(actions);
+
   // 分岔時才需要比較兩種處置的結果。
   if (data.is_diverged) {
     const grid = document.createElement("div");
@@ -444,6 +449,8 @@ async function renderDetail() {
     return;
   }
 
+  updateConflictBanner();
+
   if (state.tab === "divergence") {
     try {
       renderDivergence(await invoke("repo_divergence", { path: repo.path }));
@@ -454,6 +461,10 @@ async function renderDetail() {
       box.textContent = String(error);
       divergencePanel.appendChild(box);
     }
+  } else if (state.tab === "workspace") {
+    renderWorkspace();
+  } else if (state.tab === "conflicts") {
+    renderConflicts();
   } else {
     try {
       renderGraph(await invoke("repo_graph", { path: repo.path, limit: 500 }));
@@ -463,10 +474,39 @@ async function renderDetail() {
   }
 }
 
-function selectRepo(path) {
+/** 有衝突或有進行中的操作時，在最上方明確提示並提供入口。 */
+function updateConflictBanner() {
+  const banner = el("conflict-banner");
+  const tab = document.querySelector('.tab[data-tab="conflicts"]');
+  const data = state.workspace;
+  const conflicts = data ? data.conflicts.length : 0;
+  const operation = data ? data.operation : null;
+
+  const needsAttention = conflicts > 0 || Boolean(operation);
+  banner.hidden = !needsAttention;
+  tab.hidden = !needsAttention;
+  if (!needsAttention) return;
+
+  banner.replaceChildren();
+  const text = document.createElement("span");
+  text.innerHTML = "";
+  const strong = document.createElement("strong");
+  strong.textContent = operation || "有未解決的衝突";
+  text.append(strong);
+  if (conflicts > 0) {
+    text.append(`　還有 ${conflicts} 個檔案的衝突要處理。`);
+  } else {
+    text.append("　衝突都解決了，可以繼續。");
+  }
+  banner.append(text, button("前往處理", () => switchTab("conflicts"), "primary"));
+}
+
+async function selectRepo(path) {
   state.selected = path;
+  state.selectedConflict = null;
   renderRepoList();
-  renderDetail();
+  await loadWorkspace();
+  await renderDetail();
 }
 
 function switchTab(tab) {
@@ -574,6 +614,8 @@ async function main() {
   wireEvents();
   await loadSettings();
   await refresh();
+  await loadWorkspace();
+  await renderDetail();
 
   // 背景排程完成一輪後會送出更新。
   if (listen) {
@@ -588,3 +630,402 @@ main().catch((error) => {
   // 啟動失敗要看得見；靜默失敗只會留下空白視窗。
   fatal(error && error.stack ? error.stack : String(error));
 });
+
+/* ---------- 確認與執行 ---------- */
+
+/** 會消滅工作成果的操作一律先問過。回傳使用者是否確定。 */
+function confirmAction(title, detail) {
+  return new Promise((resolve) => {
+    const backdrop = el("confirm-backdrop");
+    el("confirm-title").textContent = title;
+    el("confirm-detail").textContent = detail;
+    backdrop.hidden = false;
+    el("confirm-ok").focus();
+
+    const finish = (answer) => {
+      backdrop.hidden = true;
+      el("confirm-ok").onclick = null;
+      el("confirm-cancel").onclick = null;
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") finish(false);
+    };
+    el("confirm-ok").onclick = () => finish(true);
+    el("confirm-cancel").onclick = () => finish(false);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+/**
+ * 執行一個會改動 repository 的指令。
+ *
+ * `confirm` 有值時先取得確認。成功後重新載入狀態，讓畫面反映實際結果
+ * 而不是樂觀更新 —— 這類操作出錯的後果太大，不該顯示未經確認的狀態。
+ */
+async function runOp(command, args, confirm) {
+  if (confirm && !(await confirmAction(confirm.title, confirm.detail))) return null;
+  setStatus("執行中…");
+  try {
+    const outcome = await invoke(command, args);
+    setStatus(outcome.message);
+    await refresh();
+    await loadWorkspace();
+    await renderDetail();
+    return outcome;
+  } catch (error) {
+    setStatus(String(error));
+    return null;
+  }
+}
+
+async function loadWorkspace() {
+  const repo = currentRepo();
+  if (!repo || repo.error) {
+    state.workspace = null;
+    return;
+  }
+  try {
+    state.workspace = await invoke("repo_workspace", { path: repo.path });
+  } catch (error) {
+    state.workspace = null;
+    setStatus(String(error));
+  }
+}
+
+/* ---------- 同步狀態的操作按鈕 ---------- */
+
+function button(label, onClick, className) {
+  const node = document.createElement("button");
+  node.type = "button";
+  node.textContent = label;
+  if (className) node.className = className;
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+function syncActions(data) {
+  const repo = currentRepo();
+  const bar = document.createElement("div");
+  bar.className = "action-bar";
+  const path = repo.path;
+  const dirty = repo.working_tree.total > 0;
+  const blocked = dirty && (data.recommendation === "rebase" || data.recommendation === "fast-forward");
+
+  if (data.recommendation === "fast-forward") {
+    bar.appendChild(button("拉取（快轉）", () => runOp("op_fast_forward", { path }), "primary"));
+  }
+  if (data.is_diverged) {
+    bar.appendChild(
+      button("用 rebase 整合", () =>
+        runOp("op_rebase", { path }, {
+          title: "以 rebase 整合",
+          detail: "你的 commit 會被重新套用到遠端內容之後，識別碼會改變。操作前會自動建立還原點。",
+        }), "primary")
+    );
+    bar.appendChild(
+      button("用 merge 整合", () =>
+        runOp("op_merge", { path }, {
+          title: "以 merge 整合",
+          detail: "會產生一個合併節點，原本的 commit 不被改寫。操作前會自動建立還原點。",
+        }))
+    );
+  }
+  if (data.ahead.length > 0 && data.behind.length === 0) {
+    bar.appendChild(button("推送", () => runOp("op_push", { path }), "primary"));
+  } else if (data.ahead.length > 0) {
+    bar.appendChild(
+      button("強制推送", () =>
+        runOp("op_push", { path, force: true }, {
+          title: "強制推送",
+          detail: "會覆寫遠端的分支。程式會先確認遠端沒有被別人推過，若有則中止。",
+        }), "danger")
+    );
+  }
+  if (blocked) {
+    bar.appendChild(
+      button("先把變更暫存起來", () => runOp("op_stash_save", { path, message: "整合前自動暫存" }))
+    );
+  }
+
+  const undoPoints = (state.workspace && state.workspace.undo_points) || [];
+  if (undoPoints.length > 0) {
+    const latest = undoPoints[0];
+    const undo = button(`還原上一步（${latest.operation}）`, () =>
+      runOp("op_undo", { path, reference: latest.reference }, {
+        title: "還原到操作前",
+        detail: `會把分支與工作目錄重設回「${latest.operation}」之前的狀態，目前未提交的變更會遺失。`,
+      }), "ghost");
+    undo.classList.add("spacer");
+    bar.appendChild(undo);
+  }
+
+  if (bar.childElementCount === 0) return null;
+  if (blocked) {
+    const note = document.createElement("div");
+    note.className = "action-note";
+    note.textContent = "工作目錄有未提交的變更，整合前需要先提交或暫存。";
+    bar.appendChild(note);
+  }
+  return bar;
+}
+
+/* ---------- 變更與提交 ---------- */
+
+function renderWorkspace() {
+  const panel = el("tab-workspace");
+  panel.replaceChildren();
+  const repo = currentRepo();
+  const data = state.workspace;
+  if (!repo || !data) {
+    panel.textContent = "沒有可顯示的資料";
+    return;
+  }
+  const path = repo.path;
+
+  // 分支列
+  const bar = document.createElement("div");
+  bar.className = "workspace-bar";
+  const select = document.createElement("select");
+  for (const branch of data.branches.filter((item) => !item.is_remote)) {
+    const option = document.createElement("option");
+    option.value = branch.name;
+    option.textContent = branch.name;
+    option.selected = branch.is_head;
+    select.appendChild(option);
+  }
+  select.addEventListener("change", () =>
+    runOp("op_checkout", { path, name: select.value })
+  );
+  const newName = document.createElement("input");
+  newName.placeholder = "新分支名稱";
+  bar.append("分支", select, newName,
+    button("建立並切換", () => {
+      if (!newName.value.trim()) return setStatus("請先輸入分支名稱");
+      return runOp("op_create_branch", { path, name: newName.value.trim() });
+    }));
+  panel.appendChild(bar);
+
+  // 變更清單
+  panel.appendChild(heading(`工作目錄的變更（${data.changes.length}）`));
+  if (data.changes.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "action-note";
+    empty.textContent = "沒有任何變更。";
+    panel.appendChild(empty);
+  } else {
+    const list = document.createElement("div");
+    list.className = "change-list";
+    for (const change of data.changes) {
+      const row = document.createElement("div");
+      row.className = "change-row";
+
+      const kind = document.createElement("span");
+      const label = change.is_conflicted
+        ? "conflict"
+        : change.staged !== "none"
+          ? change.staged
+          : change.unstaged;
+      kind.className = `kind ${label}`;
+      kind.textContent = { new: "新增", modified: "修改", deleted: "刪除", renamed: "改名", conflict: "衝突" }[label] || label;
+
+      const pathNode = document.createElement("span");
+      pathNode.className = "path";
+      pathNode.textContent = change.path;
+      row.append(kind, pathNode);
+
+      if (!change.is_conflicted) {
+        if (change.staged === "none") {
+          row.appendChild(button("暫存", () => runOp("op_stage", { path, paths: [change.path] })));
+        } else {
+          row.appendChild(button("取消暫存", () => runOp("op_unstage", { path, paths: [change.path] })));
+        }
+        if (!change.is_untracked) {
+          row.appendChild(
+            button("丟棄", () =>
+              runOp("op_discard", { path, paths: [change.path] }, {
+                title: `丟棄 ${change.path} 的變更`,
+                detail: "尚未提交的編輯會永久消失，git 無法還原。",
+              }), "ghost danger")
+          );
+        }
+      }
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+
+    const bulk = document.createElement("div");
+    bulk.className = "action-bar";
+    bulk.append(
+      button("暫存全部", () => runOp("op_stage", { path, paths: [] })),
+      button("取消暫存全部", () => runOp("op_unstage", { path, paths: [] }))
+    );
+    panel.appendChild(bulk);
+  }
+
+  // 提交
+  panel.appendChild(heading("提交"));
+  const box = document.createElement("div");
+  box.className = "commit-box";
+  const message = document.createElement("textarea");
+  message.placeholder = "這次改了什麼？";
+  const actions = document.createElement("div");
+  actions.className = "commit-actions";
+  const amendLabel = document.createElement("label");
+  const amend = document.createElement("input");
+  amend.type = "checkbox";
+  amendLabel.append(amend, "改寫前一個 commit");
+  actions.append(
+    button("提交", async () => {
+      const outcome = await runOp("op_commit", {
+        path,
+        message: message.value,
+        amend: amend.checked,
+      }, amend.checked ? {
+        title: "改寫前一個 commit",
+        detail: "識別碼會改變。如果它已經推送出去，其他人會看到歷史不一致。",
+      } : undefined);
+      if (outcome) message.value = "";
+    }, "primary"),
+    amendLabel
+  );
+  box.append(message, actions);
+  panel.appendChild(box);
+
+  // Stash
+  panel.appendChild(heading(`暫存（${data.stashes.length}）`));
+  const stashBar = document.createElement("div");
+  stashBar.className = "action-bar";
+  stashBar.appendChild(button("把目前的變更暫存起來", () => runOp("op_stash_save", { path, message: "" })));
+  panel.appendChild(stashBar);
+  if (data.stashes.length > 0) {
+    const list = document.createElement("div");
+    list.className = "change-list";
+    for (const stash of data.stashes) {
+      const row = document.createElement("div");
+      row.className = "change-row";
+      const text = document.createElement("span");
+      text.className = "path";
+      text.textContent = stash.message;
+      row.append(text,
+        button("取出", () => runOp("op_stash_pop", { path, index: stash.index })),
+        button("刪除", () =>
+          runOp("op_stash_drop", { path, index: stash.index }, {
+            title: "刪除這筆暫存",
+            detail: "裡面的內容會永久消失。",
+          }), "ghost danger"));
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+}
+
+/* ---------- 解決衝突 ---------- */
+
+function sidePane(title, side, onUse) {
+  const pane = document.createElement("div");
+  pane.className = "side-pane";
+  const header = document.createElement("h4");
+  header.textContent = title;
+  if (onUse) header.appendChild(button("採用這一方", onUse));
+  const body = document.createElement("pre");
+  body.textContent = side.exists
+    ? (side.text === null ? "（二進位檔案）" : side.text)
+    : "（這一方刪除了這個檔案）";
+  pane.append(header, body);
+  return pane;
+}
+
+function renderConflicts() {
+  const panel = el("tab-conflicts");
+  panel.replaceChildren();
+  const repo = currentRepo();
+  const data = state.workspace;
+  if (!repo || !data) return;
+  const path = repo.path;
+  const files = data.conflicts;
+
+  const bar = document.createElement("div");
+  bar.className = "action-bar";
+  if (files.length === 0) {
+    bar.appendChild(button("全部解決了，繼續", () => runOp("op_continue", { path }), "primary"));
+  }
+  bar.appendChild(
+    button("中止，回到操作前", () =>
+      runOp("op_abort", { path }, {
+        title: "中止這次操作",
+        detail: "會回到操作開始前的狀態，這段期間解掉的衝突會白費。",
+      }), "ghost danger")
+  );
+  if (data.operation && data.operation.includes("rebase")) {
+    bar.appendChild(
+      button("略過這個 commit", () =>
+        runOp("op_skip_step", { path }, {
+          title: "略過這一個 commit",
+          detail: "這個 commit 的變更不會被套用，等於捨棄它。",
+        }), "ghost")
+    );
+  }
+  panel.appendChild(bar);
+
+  if (files.length === 0) {
+    const done = document.createElement("p");
+    done.className = "action-note";
+    done.textContent = "沒有未解決的衝突了。";
+    panel.appendChild(done);
+    return;
+  }
+
+  const layout = document.createElement("div");
+  layout.className = "conflict-layout";
+
+  const fileList = document.createElement("div");
+  fileList.className = "conflict-files";
+  if (!files.some((file) => file.path === state.selectedConflict)) {
+    state.selectedConflict = files[0].path;
+  }
+  for (const file of files) {
+    const item = button(file.path, () => {
+      state.selectedConflict = file.path;
+      renderConflicts();
+    });
+    if (file.path === state.selectedConflict) item.classList.add("selected");
+    fileList.appendChild(item);
+  }
+
+  const detail = document.createElement("div");
+  const current = files.find((file) => file.path === state.selectedConflict);
+
+  const sides = document.createElement("div");
+  sides.className = "side-by-side";
+  sides.append(
+    sidePane("我的版本", current.ours, () =>
+      runOp("op_resolve_conflict", { path, file: current.path, side: "ours" })),
+    sidePane("他們的版本", current.theirs, () =>
+      runOp("op_resolve_conflict", { path, file: current.path, side: "theirs" }))
+  );
+  detail.appendChild(sides);
+
+  if (current.is_binary) {
+    const note = document.createElement("p");
+    note.className = "action-note";
+    note.textContent = "二進位檔案無法逐行編輯，請整檔擇一。";
+    detail.appendChild(note);
+  } else {
+    detail.appendChild(heading("合併後的內容（可直接編輯，含 <<<< 標記的地方要處理掉）"));
+    const editor = document.createElement("textarea");
+    editor.className = "merged-editor";
+    editor.value = current.merged || "";
+    const save = document.createElement("div");
+    save.className = "action-bar";
+    save.appendChild(
+      button("以這個內容標記為已解決", () =>
+        runOp("op_resolve_conflict", { path, file: current.path, content: editor.value }), "primary")
+    );
+    detail.append(editor, save);
+  }
+
+  layout.append(fileList, detail);
+  panel.appendChild(layout);
+}

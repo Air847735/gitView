@@ -98,7 +98,7 @@ fn classify(error: &git2::Error) -> FetchFailure {
 ///
 /// 每種方式只嘗試一次：libgit2 會重複呼叫此函式直到成功或放棄，
 /// 若同一種方式無限重試會造成迴圈。
-fn make_credentials_callback(
+pub(crate) fn make_credentials_callback(
 ) -> impl FnMut(&str, Option<&str>, CredentialType) -> Result<Cred, git2::Error> {
     let mut tried_agent = false;
     let mut tried_helper = false;

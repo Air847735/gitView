@@ -4,7 +4,7 @@
 
 use tauri::State;
 
-use crate::dto::{DivergenceDto, GraphDto, RepoStatusDto};
+use crate::dto::{DivergenceDto, GraphDto, OpOutcomeDto, RepoStatusDto};
 use crate::service::{self, AppState, DEFAULT_GRAPH_LIMIT};
 use crate::settings::Settings;
 
@@ -74,4 +74,109 @@ pub fn fetch_all(state: State<'_, AppState>) -> Vec<RepoStatusDto> {
         service::fetch_repo(&state, path);
     }
     service::all_statuses(&state)
+}
+
+/// 一次取回工作區狀態：變更、分支、stash、衝突、還原點。
+#[tauri::command]
+pub fn repo_workspace(path: String) -> Result<crate::dto::WorkspaceDto, String> {
+    service::workspace_of(&path)
+}
+
+#[tauri::command]
+pub fn op_fast_forward(path: String) -> Result<OpOutcomeDto, String> {
+    service::fast_forward(&path)
+}
+
+#[tauri::command]
+pub fn op_rebase(path: String) -> Result<OpOutcomeDto, String> {
+    service::rebase(&path)
+}
+
+#[tauri::command]
+pub fn op_merge(path: String) -> Result<OpOutcomeDto, String> {
+    service::merge(&path)
+}
+
+#[tauri::command]
+pub fn op_push(path: String, force: Option<bool>) -> Result<OpOutcomeDto, String> {
+    service::push(&path, force.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn op_abort(path: String) -> Result<OpOutcomeDto, String> {
+    service::abort(&path)
+}
+
+#[tauri::command]
+pub fn op_undo(path: String, reference: String) -> Result<OpOutcomeDto, String> {
+    service::undo(&path, &reference)
+}
+
+#[tauri::command]
+pub fn op_stage(path: String, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    service::stage(&path, paths)
+}
+
+#[tauri::command]
+pub fn op_unstage(path: String, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    service::unstage(&path, paths)
+}
+
+#[tauri::command]
+pub fn op_commit(
+    path: String,
+    message: String,
+    amend: Option<bool>,
+) -> Result<OpOutcomeDto, String> {
+    service::commit(&path, message, amend.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn op_discard(path: String, paths: Vec<String>) -> Result<OpOutcomeDto, String> {
+    service::discard(&path, paths)
+}
+
+#[tauri::command]
+pub fn op_checkout(path: String, name: String) -> Result<OpOutcomeDto, String> {
+    service::checkout_branch(&path, name)
+}
+
+#[tauri::command]
+pub fn op_create_branch(path: String, name: String) -> Result<OpOutcomeDto, String> {
+    service::create_branch(&path, name)
+}
+
+#[tauri::command]
+pub fn op_stash_save(path: String, message: Option<String>) -> Result<OpOutcomeDto, String> {
+    service::stash_save(&path, message.unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn op_stash_pop(path: String, index: usize) -> Result<OpOutcomeDto, String> {
+    service::stash_pop(&path, index)
+}
+
+#[tauri::command]
+pub fn op_stash_drop(path: String, index: usize) -> Result<OpOutcomeDto, String> {
+    service::stash_drop(&path, index)
+}
+
+#[tauri::command]
+pub fn op_resolve_conflict(
+    path: String,
+    file: String,
+    side: Option<String>,
+    content: Option<String>,
+) -> Result<OpOutcomeDto, String> {
+    service::resolve_conflict(&path, file, side, content)
+}
+
+#[tauri::command]
+pub fn op_continue(path: String) -> Result<OpOutcomeDto, String> {
+    service::continue_operation(&path)
+}
+
+#[tauri::command]
+pub fn op_skip_step(path: String) -> Result<OpOutcomeDto, String> {
+    service::skip_step(&path)
 }
