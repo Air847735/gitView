@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "crates/app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,5 +10,7 @@ repository = "https://github.com/Air847735/gitView"
 
 [workspace.dependencies]
 anyhow = "1.0"
-git2 = "0.21"
+# git2 的預設 features 是空的：不開 ssh 與 https 就無法對遠端 fetch。
+# 兩者都會連帶開啟 cred，credential helper 需要它。
+git2 = { version = "0.21", features = ["ssh", "https"] }
 gitview-core = { path = "crates/core" }

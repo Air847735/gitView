@@ -5,13 +5,27 @@
 
 pub mod dag;
 pub mod layout;
+
+#[cfg(feature = "git")]
+pub mod divergence;
+#[cfg(feature = "git")]
+pub mod fetch;
 #[cfg(feature = "git")]
 pub mod repo;
+#[cfg(feature = "git")]
+pub mod status;
 
 pub use dag::{Commit, CommitGraph, CommitGraphBuilder, NodeIndex};
 pub use layout::{assign_lanes, lay_out, topo_time_order, Edge, Layout, LayoutError};
+
 #[cfg(feature = "git")]
-pub use repo::{load_graph, summarize, RepoSummary};
+pub use divergence::{analyse, ConflictRisk, Divergence, Recommendation};
+#[cfg(feature = "git")]
+pub use fetch::{default_remote, fetch, FetchFailure, FetchReport};
+#[cfg(feature = "git")]
+pub use repo::{load_graph, ref_labels, summarize, RepoSummary};
+#[cfg(feature = "git")]
+pub use status::{status, Attention, RepoStatus, WorkingTree};
 
 #[cfg(test)]
 pub(crate) mod testutil {

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gitview</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">gitview</div>
+    <div class="toolbar-actions">
+      <button id="add-repo" type="button">加入 repository</button>
+      <button id="fetch-all" type="button">立即檢查全部</button>
+      <button id="toggle-settings" type="button" class="ghost">設定</button>
+    </div>
+    <div id="global-status" class="global-status" role="status" aria-live="polite"></div>
+  </header>
+
+  <section id="settings-panel" class="settings-panel" hidden>
+    <label>
+      背景檢查間隔
+      <select id="fetch-interval">
+        <option value="60">1 分鐘</option>
+        <option value="300">5 分鐘</option>
+        <option value="900">15 分鐘</option>
+        <option value="1800">30 分鐘</option>
+        <option value="3600">1 小時</option>
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="background-fetch" />
+      啟用背景檢查
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="notify-incoming" />
+      有新內容時發出通知
+    </label>
+    <p class="hint">
+      進來的變更會碰到本機未提交的檔案時，即使關閉通知也一定會提醒。
+    </p>
+  </section>
+
+  <main class="layout">
+    <aside class="repo-list" aria-label="Repository 清單">
+      <div id="repos"></div>
+      <p id="empty-hint" class="empty-hint">
+        還沒有加入任何 repository。<br />按上方的「加入 repository」開始。
+      </p>
+    </aside>
+
+    <section class="detail">
+      <div id="detail-empty" class="detail-empty">選擇左側的 repository 檢視細節</div>
+
+      <div id="detail-body" hidden>
+        <div class="detail-header">
+          <div>
+            <h1 id="detail-name"></h1>
+            <div id="detail-path" class="path"></div>
+          </div>
+          <div class="detail-actions">
+            <button id="fetch-one" type="button">檢查更新</button>
+            <button id="remove-repo" type="button" class="ghost danger">移除</button>
+          </div>
+        </div>
+
+        <div id="detail-chips" class="chips"></div>
+
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="divergence" role="tab" type="button">同步狀態</button>
+          <button class="tab" data-tab="graph" role="tab" type="button">歷史圖</button>
+        </nav>
+
+        <div id="tab-divergence" class="tab-panel" role="tabpanel"></div>
+
+        <div id="tab-graph" class="tab-panel" role="tabpanel" hidden>
+          <div id="graph-meta" class="graph-meta"></div>
+          <div id="graph-view" class="graph-view">
+            <canvas id="graph-canvas"></canvas>
+            <div id="graph-rows"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

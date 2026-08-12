@@ -2,28 +2,34 @@
 
 本文件回答「如何實作與驗證」，保存目前採用的系統設計、演算法、測試方法與重要取捨。需求與成功標準以 `spec.md` 為準。
 
-**目前狀態：尚無任何實作。** 以下為設計意圖，未經程式碼或實測驗證。實作開始後須依實際結果修正本文件。
+**目前狀態：核心功能已實作並通過測試。** 尚未實作的是基本 Git 操作（提交、分支、stash、衝突解決等），清單見 `spec.md`。
 
 ## Overview
 
 - System / approach：單一本機桌面應用程式，常駐系統列。Rust 負責 git 資料讀取、圖形佈局計算、背景排程與分岔分析；前端負責介面呈現。不含伺服器元件，不含使用者帳號。
-- Primary language / runtime：Rust（版本待確認）+ Tauri 2。前端框架待確認。
+- Primary language / runtime：Rust 1.97 + Tauri 2。前端為純 HTML/CSS/JS，無框架與打包工具。
 - Data / external boundary：
   - 讀取：本機檔案系統上的 Git repository（object database、refs、工作目錄狀態）。
   - 網路：透過 SSH 對遠端 git 主機執行 fetch。認證委由系統既有的 SSH agent，應用程式不持有金鑰。
-  - 寫入：使用者設定檔（格式與位置待確認）；以及經使用者確認後對 repository 執行的 git 操作。
+  - 寫入：使用者設定檔（JSON，位於系統設定目錄）；以及 fetch 對遠端追蹤分支的更新。目前不執行任何會改動本機分支或工作目錄的操作。
 
 ## Repository Map
 
-尚未建立任何原始碼檔案。規劃結構如下，實作時以實際結構為準。
-
-- Rust 端：git 存取層、圖形佈局、背景排程、分岔分析、與前端的介面層
-- 前端：多 repo 總覽、單一 repo 歷史圖、變更預覽、分岔預覽
-- 測試位置：待確認
+- `crates/core/src/dag.rs`：commit DAG 的 arena 表示與兩階段建構。
+- `crates/core/src/layout.rs`：時間與拓撲的混合排序、線道配置。零相依。
+- `crates/core/src/repo.rs`：以 git2 讀取 commit 與 ref。只讀不寫。
+- `crates/core/src/status.rs`：狀態彙整與需要注意的程度分級。
+- `crates/core/src/divergence.rs`：分岔分析與建議。
+- `crates/core/src/fetch.rs`：fetch 與認證，錯誤分類為認證／網路／其他。
+- `crates/app/src/service.rs`：應用程式狀態與各項操作，指令與背景排程共用。
+- `crates/app/src/commands.rs`：前端可呼叫的指令。
+- `crates/app/src/watcher.rs`：背景排程與通知規則。
+- `crates/app/src/dto.rs`：傳給前端的資料形狀。
+- `crates/app/ui/`：前端，純 HTML/CSS/JS。
+- `crates/cli/src/main.rs`：命令列工具。
+- 測試：各模組內的 `#[cfg(test)]`，以及 `crates/*/tests/` 下的整合測試。
 
 ## Components and Responsibilities
-
-以下為規劃中的責任切分，尚未實作。
 
 - **Git 存取層**：開啟 repository、讀取 commit 與 refs、讀取工作目錄狀態、執行 fetch。所有對 git 的存取集中於此，其餘元件不直接接觸底層函式庫，以保留日後更換實作的空間。
 - **狀態彙整**：對每個受監控的 repository 計算總覽所需狀態（領先／落後 commit 數、未提交變更數、目前分支、是否處於未完成操作中）。
@@ -34,18 +40,18 @@
 
 ## Interfaces and Data Flow
 
-1. 使用者加入 repository（方式待確認）。應用程式讀取其狀態並顯示於總覽。
+1. 使用者以資料夾選擇器加入 repository；路徑經 `Repository::discover` 驗證並正規化為工作目錄路徑後存入設定。
 2. 背景排程定期對各 repository 執行 fetch。
 3. Fetch 完成後重新計算狀態；若出現需要注意的變化，發出通知。
 4. 使用者點選單一 repository 時，讀取 commit 歷史並執行圖形佈局，於前端繪出。
 5. 使用者要求 pull 或處理分岔時，先執行分岔分析並呈現預覽；使用者確認後才執行實際 git 操作。
 
 - Interface：桌面圖形介面 + 系統通知。無對外 API。
-- Data model / state：核心資料為 commit DAG（節點與父子關係）、各 repository 的狀態快照、使用者設定。具體結構待實作時確定。
+- Data model / state：核心資料為 commit DAG（arena 容器加索引）、各 repository 的狀態快照、使用者設定。應用程式層另存每個 repository 上次 fetch 的結果。
 
 ## Algorithm Design
 
-本專案有兩個需要設計的演算法。兩者皆尚未實作。
+本專案有兩個需要設計的演算法。兩者皆已實作並有測試涵蓋。
 
 ### A. Commit 圖形佈局
 
@@ -69,11 +75,11 @@
 
 #### Correctness
 
-尚未論證。實作時應以測試鎖定兩項性質：所有邊方向一致；相同輸入產生相同輸出。
+兩項關鍵性質已由測試鎖定：所有邊方向一致（`parents_never_precede_children`）；相同輸入產生相同輸出，與插入順序無關（`order_does_not_depend_on_insertion_order`、`equal_timestamps_break_ties_by_oid`）。整體正確性尚未形式化論證。
 
 #### Complexity and Practical Limits
 
-- Time / Space：待確認，需依實作後量測。
+- Time / Space：排序為 O(V+E log V)，線道配置為 O(V × 線道數)。實測 85,224 個節點於 1.13 秒內完成，峰值記憶體 233MB。
 - Practical limit：目標使用情境為個人與小型團隊專案（數百至數千個 commit）。超大型 repository 不在本階段目標內。
 
 #### Edge Cases
@@ -115,46 +121,61 @@
 
 ### Strategy
 
-尚未建立。規劃方向：
-
-- Unit：圖形佈局的排序與線道分配（可用合成的 DAG 測試，不需真實 repository）；分岔分析的集合運算。
-- Integration / system：對真實 repository 執行，與 git 指令的輸出比對。
-- Static checks：`cargo fmt`、`cargo clippy`。
-- Experiment / benchmark：與 Sourcetree 的效能比較。基準 repository、指標與方法皆待定義。
+- Unit：圖形佈局的排序與線道分配以合成 DAG 測試，不需真實 repository；分岔建議、狀態分級、fetch 錯誤分類同樣為純函式測試。
+- Integration：於暫存目錄自建 repository（含以本機裸 repository 模擬遠端），驗證讀取、狀態、分岔分析與應用程式資料層。不連網。
+- Static checks：`cargo fmt`、`cargo clippy --all-targets -D warnings`。
+- 介面繪製：無自動化方式，需人工在實體桌面環境確認。
 
 ### Commands
 
-待確認。開發環境尚未建立。
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
 
 ### Data and Environment
 
-- Dataset / fixture：待確認。單元測試預期使用合成 DAG；整合測試需要具有分支與合併的真實 repository。
+- Dataset / fixture：單元測試使用合成 DAG；整合測試於執行時自建暫存 repository。效能量測使用 git 專案本身的 blobless clone。
 - Environment：開發環境為 Ubuntu 24.04.4 LTS x86_64，31GB RAM，12 核心。目標平台為 Windows 與 Linux。
-- Baseline：Sourcetree（版本待確認）。
-- Metrics：待定義。
-- Reproducibility：待確認。
+- Baseline：Sourcetree。版本與比較方法尚未定義。
+- Metrics：讀取與佈局耗時、峰值記憶體、線道數、跨線道邊數。
+- Reproducibility：佈局為決定性函式，相同 repository 每次輸出相同；效能數據為單次量測，未取多次平均。
 
 ### Critical Cases
 
-- [ ] 正常案例：具有多個分支與合併的 repository 能正確繪出。
-- [ ] 邊界案例：空 repository、單一 commit、多根節點、未完成的 rebase 狀態。
-- [ ] 與已知答案比對：狀態計算結果與 git 指令輸出一致。
-- [ ] 錯誤案例：SSH 認證失敗、遠端無法連線、路徑消失。
+- [x] 正常案例：具有分支與合併的 repository 能正確讀取並佈局。
+- [x] 邊界案例：空 repository、單一 commit、多根節點、重複 oid、缺漏父節點、環。
+- [x] 與已知答案比對：以 git2 建立已知結構後驗證領先／落後數與檔案集合。
+- [x] 錯誤案例：路徑消失、非 repository、無追蹤分支、fetch 錯誤分類。
+- [ ] 未完成的 rebase 狀態：狀態分級已有單元測試，但未對真實的 rebase 中途狀態測試。
+- [ ] SSH 認證失敗與遠端無法連線的實地驗證（錯誤分類已有單元測試）。
 
 ### Verification Status
 
 環境：Ubuntu 24.04.4 x86_64、Rust 1.97.1、gcc 13.3.0、31GB RAM、12 核心。
 
-- `cargo test --workspace`：`passed`，20 項
-  - 單元測試 16 項：排序決定性、線道配置、空圖、單一 commit、多根節點、
-    重複 oid、缺漏父節點、環的偵測。
-  - 整合測試 4 項：對自建暫存 repository 讀取線性歷史、分支與合併、
-    工作目錄狀態、空 repository。
+- `cargo test --workspace`：`passed`，72 項
+  - core 單元測試 34 項：排序決定性、線道配置、空圖、單一 commit、多根節點、
+    重複 oid、缺漏父節點、環的偵測、狀態分級、分岔建議、fetch 錯誤分類。
+  - core 整合測試 10 項：對自建暫存 repository 驗證讀取、分支與合併、
+    工作目錄計數，以及以本機裸 repository 模擬遠端後的完整分岔情境
+    （檔案不重疊、檔案重疊、未提交變更受影響、無追蹤分支）。
+  - app 單元測試 17 項：設定正規化與往返、通知的重複抑制、排序規則。
+  - app 整合測試 11 項：加入與移除 repository、設定持久化、路徑消失的處理、
+    排序、圖形資料與截斷、分岔資料。
 - `cargo clippy --workspace --all-targets`（`-D warnings`）：`passed`
 - `cargo fmt --check`：`passed`
+- `cargo build --release`：`passed`
 - 命令列工具對真實 repository 執行：`passed` —— 見下方實測。
+- 桌面應用程式啟動：`passed` —— 視窗可開啟、程序穩定執行。
+- **桌面介面的繪製：`not run`** —— 開發環境為遠端桌面工作階段且無硬體加速，
+  WebKitGTK 無法繪製任何內容。已以最小測試頁面確認這是環境限制而非程式缺陷
+  （純色頁面同樣不顯示）。需在實體桌面環境確認。
+- 背景 fetch 對真實遠端執行：`not run` —— 本機無 SSH 私鑰，且不應在未經
+  要求下對使用者的 repository 連線。fetch 的錯誤分類已有單元測試涵蓋。
 - 與 Sourcetree 的效能比較：`not run` —— 方法尚未定義。
-- 桌面應用程式（Tauri）：`not run` —— 尚未開始。
+- 安裝檔封裝（`cargo tauri build`）：`not run`。
 
 不得把未實際執行的檢查記為通過。
 
@@ -179,9 +200,23 @@ topic 分支，每個合併的第二個父節點都會開一條線道並持續�
 repository，需要額外的機制（例如只佈局可見範圍、或將側分支收合），
 屆時應先量測再設計。命令列工具目前以繪製上限 12 條線道處理，超出的以計數表示。
 
-不得把未實際執行的檢查記為通過。
-
 ## Design Decisions and Trade-offs
+
+### 介面層的四個取捨
+
+**前端不使用框架與打包工具。** 這個介面是一份儀表板加一張圖，框架帶來的
+狀態管理與元件化在此規模下沒有回報，卻要換來 npm 相依樹、打包設定與版本
+升級的長期負擔。純 HTML/CSS/JS 讓建置只剩 `cargo build` 一步。
+
+**歷史圖以 canvas 畫線、以 HTML 排文字。** 全部畫在 canvas 上會讓中文字型
+與選取行為都要自己處理；全部用 DOM 則在數千個節點時會拖慢捲動。分工之後
+兩邊都用在它擅長的地方。
+
+**狀態同時以文字與顏色表示。** 只用顏色編碼狀態的話，色覺障礙者無法分辨；
+合併節點畫成空心圓也是同樣的理由 —— 形狀本身要能區分。
+
+**核心層不依賴 serde。** DTO 定義在應用程式層，介面需要什麼欄位不會反過來
+牽動核心的資料模型。代價是多一層轉換程式碼，換得的是兩邊可以各自演進。
 
 ### 採用 Rust + Tauri
 
@@ -219,8 +254,14 @@ repository，需要額外的機制（例如只佈局可見範圍、或將側分�
 
 ## Known Gaps
 
-- 全部實作。專案目前只有文件。
-- 開發環境未安裝：Rust 工具鏈、Node.js、C 編譯器、Tauri 的 Linux 系統依賴皆缺。
-- Windows 建置途徑未確認（需實體 Windows 環境或 CI）。
-- 效能目標未量化，與 Sourcetree 的比較方法未定義。
-- 「基本功能都要有」的具體清單未定義，見 `spec.md` 的 Open Questions。
+- **基本 Git 操作尚未實作。** 目前只讀不寫（fetch 除外），無法提交、切換分支、
+  stash 或解衝突。清單與分級見 `spec.md` 的「基本功能清單」。
+- **桌面介面的繪製未經目視驗證。** 開發環境無法繪製 WebKitGTK 內容，
+  已確認為環境限制。需在實體桌面環境確認。
+- **分岔處置只有預覽，沒有執行。** 介面會畫出 rebase 與 merge 的結果並給建議，
+  但不會替使用者執行，也還沒有對應的復原路徑。這是刻意的順序：
+  會改寫歷史的操作要等預覽本身被確認可信之後再做。
+- 背景 fetch 未對真實遠端驗證（本機無 SSH 私鑰）。
+- Windows 建置途徑未確認，需實體 Windows 環境或 CI。
+- 與 Sourcetree 的效能比較方法未定義。
+- 大型 repository 的線道數問題（見實測結果），目標規模不受影響。

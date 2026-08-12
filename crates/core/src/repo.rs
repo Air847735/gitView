@@ -5,6 +5,8 @@
 //!
 //! 本模組只讀取，不寫入。任何會改動使用者 repository 的操作不放在這裡。
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use git2::{Repository, Sort};
 
@@ -74,6 +76,37 @@ pub fn load_graph(repo: &Repository) -> Result<CommitGraph> {
     }
 
     Ok(builder.build())
+}
+
+/// 每個 commit 上有哪些 ref 指著它。
+///
+/// 用於把分支名稱直接標在圖上的線旁邊，而不是只列在側欄。
+pub fn ref_labels(repo: &Repository) -> Result<HashMap<String, Vec<String>>> {
+    let mut labels: HashMap<String, Vec<String>> = HashMap::new();
+    let references = repo.references().context("無法列出 refs")?;
+
+    for reference in references {
+        let reference = match reference {
+            Ok(reference) => reference,
+            Err(_) => continue,
+        };
+        // 標籤可能指向 tag 物件，需要剝到 commit 才知道實際位置。
+        let target = match reference.peel_to_commit() {
+            Ok(commit) => commit.id().to_string(),
+            Err(_) => continue,
+        };
+        let name = match reference.shorthand() {
+            Ok(name) => name.to_owned(),
+            Err(_) => String::from_utf8_lossy(reference.shorthand_bytes()).into_owned(),
+        };
+        labels.entry(target).or_default().push(name);
+    }
+
+    // 名稱排序，讓同一個 commit 上的標籤順序穩定。
+    for names in labels.values_mut() {
+        names.sort();
+    }
+    Ok(labels)
 }
 
 /// 讀出 repository 的概況。

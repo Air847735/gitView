@@ -26,13 +26,18 @@ webkit2gtk-4.1 2.52.3。下列指令皆已實際執行並通過。
 - Install / setup: 見 `README.md`。系統依賴安裝需 sudo 權限。
 - Format: `cargo fmt` — 通過
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings` — 通過
-- Unit / integration test: `cargo test --workspace` — 通過，20 項（16 單元 + 4 整合）
+- Unit / integration test: `cargo test --workspace` — 通過，72 項
 - Build: `cargo build --release` — 通過
-- Run: `./target/release/gitview <repository 路徑> [--limit N]`
-- Build / package（桌面應用）: 待確認，Tauri 尚未導入
+- Run（命令列）: `./target/release/gitview <repository 路徑> [--limit N]`
+- Run（桌面應用）: `./target/release/gitview-app`
+- Build / package（安裝檔）: 待確認，尚未執行 `cargo tauri build`
 - Benchmark（適用時）: 未定義。已有的實測數據記於 `docs/architecture.md`。
 
-整合測試會在系統暫存目錄自建 repository，不會接觸使用者既有的任何 repository。
+整合測試會在系統暫存目錄自建 repository，不會接觸使用者既有的任何 repository，也不連網。
+
+**桌面介面的繪製尚未經過目視驗證。** 本機是遠端桌面工作階段且無硬體加速，
+WebKitGTK 無法繪製內容（連最小的測試頁面也是空白），此為環境限制而非程式缺陷。
+介面所消費的資料層已由整合測試涵蓋，未驗證的部分只有繪製本身。
 
 不得宣稱未實際執行的檢查已通過。無法在本機確認的外部服務、正式資料、部署、效能與安全結果，必須列為未驗證。
 

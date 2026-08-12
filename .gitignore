@@ -20,10 +20,10 @@ temp/
 **/target/
 *.pdb
 
-# Tauri
-/src-tauri/target/
-/src-tauri/gen/
-/src-tauri/WixTools/
+# Tauri（gen/ 由 tauri-build 產生）
+crates/app/gen/
+crates/app/target/
+**/WixTools/
 
 # Node / frontend
 node_modules/
