@@ -558,3 +558,106 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .confirm-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
 .confirm-box p { margin: 0 0 1rem; color: var(--ink-mid); font-size: 0.9rem; }
 .confirm-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+
+/* ---- 差異呈現 ---- */
+.diff-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 0.8rem;
+  align-items: start;
+  margin-bottom: 1.2rem;
+}
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.diff-title { font-family: var(--mono); font-size: 0.8rem; }
+.diff-counts { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-soft); }
+
+.hunk {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 0.7rem;
+  background: var(--surface);
+}
+.hunk.collides { border-color: var(--diverged); }
+.hunk-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+.hunk-header button { margin-left: auto; padding: 0.1rem 0.45rem; font-size: 0.7rem; }
+.collide-tag {
+  color: var(--diverged);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+.ws-tag {
+  color: var(--ink-soft);
+  border: 1px dashed currentColor;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+
+.diff-body {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.diff-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0 0.4rem;
+  white-space: pre;
+}
+.diff-row.added, .diff-cell.added { background: color-mix(in srgb, var(--incoming) 12%, transparent); }
+.diff-row.removed, .diff-cell.removed { background: color-mix(in srgb, var(--diverged) 12%, transparent); }
+.diff-row.ws-only, .diff-cell.ws-only { opacity: 0.62; }
+.diff-row.selectable, .diff-cell.selectable { cursor: pointer; }
+.diff-row.selectable:hover, .diff-cell.selectable:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
+.diff-row.selected, .diff-cell.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.lineno {
+  display: inline-block;
+  min-width: 3ch;
+  text-align: right;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+  user-select: none;
+}
+.sign { width: 1ch; flex-shrink: 0; color: var(--ink-soft); }
+.code { white-space: pre; }
+.diff-body mark {
+  background: color-mix(in srgb, var(--uncommitted) 45%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.diff-split-row { display: grid; grid-template-columns: 1fr 1fr; }
+.diff-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0 0.4rem;
+  white-space: pre;
+  border-right: 1px solid var(--line-soft);
+  min-height: 1.55em;
+}
+.diff-cell.empty { background: var(--surface-2); opacity: 0.4; }

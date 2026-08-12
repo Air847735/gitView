@@ -180,3 +180,40 @@ pub fn op_continue(path: String) -> Result<OpOutcomeDto, String> {
 pub fn op_skip_step(path: String) -> Result<OpOutcomeDto, String> {
     service::skip_step(&path)
 }
+
+#[tauri::command]
+pub fn repo_diff(path: String, source: String) -> Result<Vec<crate::dto::FileDiffDto>, String> {
+    service::diff_of(&path, &source)
+}
+
+#[tauri::command]
+pub fn commit_detail(path: String, oid: String) -> Result<crate::dto::CommitDetailDto, String> {
+    service::commit_detail_of(&path, &oid)
+}
+
+#[tauri::command]
+pub fn file_history(
+    path: String,
+    file: String,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    service::file_history_of(&path, &file, limit.unwrap_or(50))
+}
+
+#[tauri::command]
+pub fn op_stage_selection(
+    path: String,
+    file: String,
+    selection: Vec<(usize, usize)>,
+) -> Result<OpOutcomeDto, String> {
+    service::stage_selection(&path, file, selection)
+}
+
+#[tauri::command]
+pub fn op_unstage_selection(
+    path: String,
+    file: String,
+    selection: Vec<(usize, usize)>,
+) -> Result<OpOutcomeDto, String> {
+    service::unstage_selection(&path, file, selection)
+}

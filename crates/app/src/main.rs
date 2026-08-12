@@ -65,6 +65,11 @@ fn main() {
             commands::op_resolve_conflict,
             commands::op_continue,
             commands::op_skip_step,
+            commands::repo_diff,
+            commands::commit_detail,
+            commands::file_history,
+            commands::op_stage_selection,
+            commands::op_unstage_selection,
         ])
         .run(tauri::generate_context!())
         .expect("gitview 啟動失敗");

@@ -9,6 +9,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use git2::Repository;
+use gitview_core::diff;
 use gitview_core::divergence::{self, Divergence};
 use gitview_core::{lay_out, repo, CommitGraph, Layout};
 
@@ -17,11 +18,14 @@ const DEFAULT_LIMIT: usize = 40;
 struct Options {
     path: String,
     limit: usize,
+    /// 顯示未提交的差異而非歷史圖。
+    show_diff: bool,
 }
 
 fn parse_args(args: &[String]) -> Result<Options> {
     let mut path = None;
     let mut limit = DEFAULT_LIMIT;
+    let mut show_diff = false;
     let mut index = 0;
 
     while index < args.len() {
@@ -33,6 +37,7 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     .parse()
                     .with_context(|| format!("--limit 的值不是有效數字：{value}"))?;
             }
+            "--diff" | "-d" => show_diff = true,
             other if other.starts_with('-') => {
                 anyhow::bail!("未知的選項：{other}");
             }
@@ -49,6 +54,7 @@ fn parse_args(args: &[String]) -> Result<Options> {
     Ok(Options {
         path: path.unwrap_or_else(|| ".".to_owned()),
         limit,
+        show_diff,
     })
 }
 
@@ -195,9 +201,75 @@ fn print_sync(divergence: &Divergence) {
     }
 }
 
+/// 印出未提交的差異，含行內標示與撞擊警告。
+fn print_diff(repository: &Repository) -> Result<()> {
+    let mut files = diff::workspace_diff(repository, diff::DiffSource::Unstaged)?;
+    if let Ok(incoming) = diff::incoming_line_ranges(repository) {
+        diff::mark_incoming_collisions(&mut files, &incoming);
+    }
+    if files.is_empty() {
+        println!("沒有未提交的變更");
+        return Ok(());
+    }
+
+    for file in &files {
+        println!("\n── {}  +{} −{}", file.path, file.added, file.removed);
+        if file.is_binary {
+            println!("   （二進位檔案）");
+            continue;
+        }
+        for hunk in &file.hunks {
+            let mut tags = Vec::new();
+            if hunk.collides_with_incoming {
+                tags.push("← 即將進來的變更也會改到這一段");
+            }
+            if hunk.whitespace_only() {
+                tags.push("（只有空白差異）");
+            }
+            println!("   {} {}", hunk.header, tags.join(" "));
+
+            for line in &hunk.lines {
+                let sign = match line.kind {
+                    diff::LineKind::Added => '+',
+                    diff::LineKind::Removed => '-',
+                    diff::LineKind::Context => ' ',
+                };
+                // 以 [ ] 標出行內實際變動的片段，讓終端機也看得到字元層級差異。
+                let rendered = if line.spans.is_empty() {
+                    line.content.clone()
+                } else {
+                    let mut out = String::new();
+                    let mut cursor = 0;
+                    for span in &line.spans {
+                        let start = span.start.min(line.content.len());
+                        let end = span.end.min(line.content.len());
+                        if start > cursor {
+                            out.push_str(&line.content[cursor..start]);
+                        }
+                        out.push('[');
+                        out.push_str(&line.content[start..end]);
+                        out.push(']');
+                        cursor = end;
+                    }
+                    if cursor < line.content.len() {
+                        out.push_str(&line.content[cursor..]);
+                    }
+                    out
+                };
+                println!("   {sign}{rendered}");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run(options: Options) -> Result<()> {
     let repository = Repository::discover(&options.path)
         .with_context(|| format!("找不到 git repository：{}", options.path))?;
+
+    if options.show_diff {
+        return print_diff(&repository);
+    }
 
     let graph = repo::load_graph(&repository)?;
     let summary = repo::summarize(&repository, &graph)?;
@@ -236,7 +308,7 @@ fn main() -> ExitCode {
         Ok(options) => options,
         Err(error) => {
             eprintln!("錯誤：{error:#}");
-            eprintln!("用法：gitview [repository 路徑] [--limit N]");
+            eprintln!("用法：gitview [repository 路徑] [--limit N] [--diff]");
             return ExitCode::FAILURE;
         }
     };

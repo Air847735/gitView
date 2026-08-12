@@ -36,6 +36,14 @@ const state = {
   tab: "divergence",
   workspace: null,
   selectedConflict: null,
+  diffFiles: [],
+  selectedFile: null,
+  /** "inline" 或 "split"。 */
+  diffMode: "inline",
+  /** "unstaged"、"staged" 或 "commit"。 */
+  diffSource: "unstaged",
+  selectedLines: new Set(),
+  commitDetail: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -340,6 +348,8 @@ function renderGraph(data) {
     const row = document.createElement("div");
     row.className = "commit-row";
     row.style.paddingLeft = `${width}px`;
+    row.title = "點擊檢視這個 commit 改了什麼";
+    row.addEventListener("click", () => showCommitDetail(commit.oid));
 
     const oid = document.createElement("span");
     oid.className = "oid";
@@ -462,6 +472,7 @@ async function renderDetail() {
       divergencePanel.appendChild(box);
     }
   } else if (state.tab === "workspace") {
+    if (state.diffSource !== "commit") await loadDiff();
     renderWorkspace();
   } else if (state.tab === "conflicts") {
     renderConflicts();
@@ -504,6 +515,11 @@ function updateConflictBanner() {
 async function selectRepo(path) {
   state.selected = path;
   state.selectedConflict = null;
+  state.selectedFile = null;
+  state.diffFiles = [];
+  state.selectedLines.clear();
+  state.commitDetail = null;
+  state.diffSource = "unstaged";
   renderRepoList();
   await loadWorkspace();
   await renderDetail();
@@ -864,6 +880,50 @@ function renderWorkspace() {
     panel.appendChild(bulk);
   }
 
+  // 差異
+  panel.appendChild(heading("差異"));
+  const sourceBar = document.createElement("div");
+  sourceBar.className = "action-bar";
+  for (const [value, label] of [["unstaged", "未暫存"], ["staged", "已暫存"]]) {
+    const item = button(label, async () => {
+      state.diffSource = value;
+      state.selectedLines.clear();
+      state.commitDetail = null;
+      await loadDiff();
+      renderWorkspace();
+    }, state.diffSource === value ? "primary" : undefined);
+    sourceBar.appendChild(item);
+  }
+  if (state.commitDetail) {
+    const info = document.createElement("span");
+    info.className = "action-note";
+    info.style.flexBasis = "auto";
+    info.textContent = `正在看 commit ${state.commitDetail.short_oid}：${state.commitDetail.summary}`;
+    sourceBar.appendChild(info);
+  }
+  panel.appendChild(sourceBar);
+
+  const diffLayout = document.createElement("div");
+  diffLayout.className = "diff-layout";
+  const fileColumn = document.createElement("div");
+  fileColumn.className = "conflict-files";
+  for (const item of state.diffFiles) {
+    const entry = button(`${item.path}  +${item.added} −${item.removed}`, () => {
+      state.selectedFile = item.path;
+      state.selectedLines.clear();
+      renderDiffPanel();
+      for (const node of fileColumn.children) node.classList.remove("selected");
+      entry.classList.add("selected");
+    });
+    if (item.path === state.selectedFile) entry.classList.add("selected");
+    fileColumn.appendChild(entry);
+  }
+  const diffHolder = document.createElement("div");
+  diffHolder.id = "diff-panel";
+  diffLayout.append(fileColumn, diffHolder);
+  panel.appendChild(diffLayout);
+  renderDiffPanel();
+
   // 提交
   panel.appendChild(heading("提交"));
   const box = document.createElement("div");
@@ -1028,4 +1088,318 @@ function renderConflicts() {
 
   layout.append(fileList, detail);
   panel.appendChild(layout);
+}
+
+/* ---------- 差異呈現 ---------- */
+
+/** 把一行切成純文字與需要標示的片段。以位元組位移切割，需轉成字元索引。 */
+function segmentsOf(line) {
+  if (!line.spans || line.spans.length === 0) return [{ text: line.content, marked: false }];
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const bytes = encoder.encode(line.content);
+  const parts = [];
+  let cursor = 0;
+  for (const span of line.spans) {
+    const start = Math.max(0, Math.min(span.start, bytes.length));
+    const end = Math.max(start, Math.min(span.end, bytes.length));
+    if (start > cursor) parts.push({ text: decoder.decode(bytes.slice(cursor, start)), marked: false });
+    parts.push({ text: decoder.decode(bytes.slice(start, end)), marked: true });
+    cursor = end;
+  }
+  if (cursor < bytes.length) parts.push({ text: decoder.decode(bytes.slice(cursor)), marked: false });
+  return parts;
+}
+
+function lineContent(line) {
+  const holder = document.createElement("span");
+  holder.className = "code";
+  for (const part of segmentsOf(line)) {
+    if (part.marked) {
+      const mark = document.createElement("mark");
+      mark.textContent = part.text;
+      holder.appendChild(mark);
+    } else {
+      holder.appendChild(document.createTextNode(part.text));
+    }
+  }
+  return holder;
+}
+
+function lineKey(hunkIndex, lineIndex) {
+  return `${hunkIndex}:${lineIndex}`;
+}
+
+function toggleLine(hunkIndex, lineIndex) {
+  const key = lineKey(hunkIndex, lineIndex);
+  if (state.selectedLines.has(key)) state.selectedLines.delete(key);
+  else state.selectedLines.add(key);
+  renderDiffPanel();
+}
+
+/** 行內模式：一欄，以顏色與前綴區分增刪。 */
+function inlineRows(file, hunkIndex, hunk) {
+  const rows = document.createDocumentFragment();
+  hunk.lines.forEach((line, lineIndex) => {
+    const row = document.createElement("div");
+    row.className = `diff-row ${line.kind}`;
+    if (line.whitespace_only) row.classList.add("ws-only");
+    const selectable = line.kind !== "context";
+    if (selectable) {
+      row.classList.add("selectable");
+      if (state.selectedLines.has(lineKey(hunkIndex, lineIndex))) row.classList.add("selected");
+      row.addEventListener("click", () => toggleLine(hunkIndex, lineIndex));
+    }
+    const oldNo = document.createElement("span");
+    oldNo.className = "lineno";
+    oldNo.textContent = line.old_lineno ?? "";
+    const newNo = document.createElement("span");
+    newNo.className = "lineno";
+    newNo.textContent = line.new_lineno ?? "";
+    const sign = document.createElement("span");
+    sign.className = "sign";
+    sign.textContent = line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " ";
+    row.append(oldNo, newNo, sign, lineContent(line));
+    rows.appendChild(row);
+  });
+  return rows;
+}
+
+/** 並排模式：左舊右新，成對的增刪對齊在同一列。 */
+function splitRows(file, hunkIndex, hunk) {
+  const rows = document.createDocumentFragment();
+  let index = 0;
+  const lines = hunk.lines;
+
+  const cell = (line, lineIndex, side) => {
+    const box = document.createElement("div");
+    box.className = `diff-cell ${line ? line.kind : "empty"}`;
+    if (!line) return box;
+    if (line.whitespace_only) box.classList.add("ws-only");
+    if (line.kind !== "context") {
+      box.classList.add("selectable");
+      if (state.selectedLines.has(lineKey(hunkIndex, lineIndex))) box.classList.add("selected");
+      box.addEventListener("click", () => toggleLine(hunkIndex, lineIndex));
+    }
+    const no = document.createElement("span");
+    no.className = "lineno";
+    no.textContent = (side === "old" ? line.old_lineno : line.new_lineno) ?? "";
+    box.append(no, lineContent(line));
+    return box;
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (line.kind === "context") {
+      const row = document.createElement("div");
+      row.className = "diff-split-row";
+      row.append(cell(line, index, "old"), cell(line, index, "new"));
+      rows.appendChild(row);
+      index += 1;
+      continue;
+    }
+    // 收集一組連續的刪除與新增，兩兩對齊。
+    const removedStart = index;
+    while (index < lines.length && lines[index].kind === "removed") index += 1;
+    const addedStart = index;
+    while (index < lines.length && lines[index].kind === "added") index += 1;
+    const removed = addedStart - removedStart;
+    const added = index - addedStart;
+
+    for (let offset = 0; offset < Math.max(removed, added); offset += 1) {
+      const row = document.createElement("div");
+      row.className = "diff-split-row";
+      const leftIndex = offset < removed ? removedStart + offset : null;
+      const rightIndex = offset < added ? addedStart + offset : null;
+      row.append(
+        leftIndex === null ? cell(null) : cell(lines[leftIndex], leftIndex, "old"),
+        rightIndex === null ? cell(null) : cell(lines[rightIndex], rightIndex, "new")
+      );
+      rows.appendChild(row);
+    }
+  }
+  return rows;
+}
+
+function selectionForStaging() {
+  return [...state.selectedLines].map((key) => key.split(":").map(Number));
+}
+
+function renderDiffPanel() {
+  const holder = el("diff-panel");
+  if (!holder) return;
+  holder.replaceChildren();
+
+  const repo = currentRepo();
+  const file = (state.diffFiles || []).find((item) => item.path === state.selectedFile);
+  if (!repo || !file) {
+    const hint = document.createElement("p");
+    hint.className = "action-note";
+    hint.textContent = "選擇左側的檔案檢視差異";
+    holder.appendChild(hint);
+    return;
+  }
+
+  const bar = document.createElement("div");
+  bar.className = "diff-toolbar";
+  const title = document.createElement("span");
+  title.className = "diff-title";
+  title.textContent = file.old_path ? `${file.old_path} → ${file.path}` : file.path;
+  const counts = document.createElement("span");
+  counts.className = "diff-counts";
+  counts.textContent = `+${file.added} −${file.removed}`;
+  const modeButton = button(
+    state.diffMode === "split" ? "改為行內顯示" : "改為並排顯示",
+    () => {
+      state.diffMode = state.diffMode === "split" ? "inline" : "split";
+      renderDiffPanel();
+    }
+  );
+  const historyButton = button("這個檔案的歷史", () => showFileHistory(file.path));
+  bar.append(title, counts, modeButton, historyButton);
+  holder.appendChild(bar);
+
+  if (state.selectedLines.size > 0) {
+    const selBar = document.createElement("div");
+    selBar.className = "action-bar";
+    const label = document.createElement("span");
+    label.className = "action-note";
+    label.style.flexBasis = "auto";
+    label.textContent = `已選取 ${state.selectedLines.size} 行`;
+    selBar.append(
+      label,
+      button(state.diffSource === "staged" ? "取消暫存選取的行" : "暫存選取的行", async () => {
+        const command = state.diffSource === "staged" ? "op_unstage_selection" : "op_stage_selection";
+        const done = await runOp(command, {
+          path: repo.path,
+          file: file.path,
+          selection: selectionForStaging(),
+        });
+        if (done) state.selectedLines.clear();
+      }, "primary"),
+      button("清除選取", () => {
+        state.selectedLines.clear();
+        renderDiffPanel();
+      }, "ghost")
+    );
+    holder.appendChild(selBar);
+  }
+
+  if (file.is_binary) {
+    const note = document.createElement("p");
+    note.className = "action-note";
+    note.textContent = "二進位檔案，無法顯示逐行差異。";
+    holder.appendChild(note);
+    return;
+  }
+
+  file.hunks.forEach((hunk, hunkIndex) => {
+    const block = document.createElement("div");
+    block.className = "hunk";
+    if (hunk.collides_with_incoming) block.classList.add("collides");
+
+    const header = document.createElement("div");
+    header.className = "hunk-header";
+    const text = document.createElement("span");
+    text.textContent = hunk.header || `@@ -${hunk.old_start} +${hunk.new_start} @@`;
+    header.appendChild(text);
+
+    if (hunk.collides_with_incoming) {
+      const warn = document.createElement("span");
+      warn.className = "collide-tag";
+      warn.textContent = "即將進來的變更也會改到這一段";
+      header.appendChild(warn);
+    }
+    if (hunk.whitespace_only) {
+      const tag = document.createElement("span");
+      tag.className = "ws-tag";
+      tag.textContent = "只有空白差異";
+      header.appendChild(tag);
+    }
+    header.appendChild(
+      button(state.diffSource === "staged" ? "取消暫存這一段" : "暫存這一段", () => {
+        const selection = [];
+        hunk.lines.forEach((line, lineIndex) => {
+          if (line.kind !== "context") selection.push([hunkIndex, lineIndex]);
+        });
+        const command = state.diffSource === "staged" ? "op_unstage_selection" : "op_stage_selection";
+        return runOp(command, { path: repo.path, file: file.path, selection });
+      })
+    );
+    block.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = `diff-body ${state.diffMode}`;
+    body.appendChild(
+      state.diffMode === "split" ? splitRows(file, hunkIndex, hunk) : inlineRows(file, hunkIndex, hunk)
+    );
+    block.appendChild(body);
+    holder.appendChild(block);
+  });
+}
+
+async function loadDiff() {
+  const repo = currentRepo();
+  if (!repo) return;
+  try {
+    state.diffFiles = await invoke("repo_diff", { path: repo.path, source: state.diffSource });
+    if (!state.diffFiles.some((file) => file.path === state.selectedFile)) {
+      state.selectedFile = state.diffFiles.length > 0 ? state.diffFiles[0].path : null;
+    }
+  } catch (error) {
+    state.diffFiles = [];
+    setStatus(String(error));
+  }
+}
+
+async function showFileHistory(file) {
+  const repo = currentRepo();
+  if (!repo) return;
+  try {
+    const oids = await invoke("file_history", { path: repo.path, file, limit: 30 });
+    const holder = el("diff-panel");
+    holder.replaceChildren();
+    const back = document.createElement("div");
+    back.className = "action-bar";
+    back.append(button("← 回到差異", () => renderDiffPanel()));
+    holder.appendChild(back);
+    holder.appendChild(heading(`${file} 的變更歷史（${oids.length}）`));
+
+    const list = document.createElement("div");
+    list.className = "change-list";
+    for (const oid of oids) {
+      const detail = await invoke("commit_detail", { path: repo.path, oid });
+      const row = document.createElement("div");
+      row.className = "change-row";
+      const id = document.createElement("span");
+      id.className = "oid";
+      id.textContent = detail.short_oid;
+      const summary = document.createElement("span");
+      summary.className = "path";
+      summary.textContent = detail.summary;
+      row.append(id, summary, button("看這次的變更", () => showCommitDetail(oid)));
+      list.appendChild(row);
+    }
+    holder.appendChild(list);
+  } catch (error) {
+    setStatus(String(error));
+  }
+}
+
+/* ---------- Commit 詳情 ---------- */
+
+async function showCommitDetail(oid) {
+  const repo = currentRepo();
+  if (!repo) return;
+  try {
+    const detail = await invoke("commit_detail", { path: repo.path, oid });
+    state.diffFiles = detail.files;
+    state.selectedFile = detail.files.length > 0 ? detail.files[0].path : null;
+    state.selectedLines.clear();
+    state.diffSource = "commit";
+    state.commitDetail = detail;
+    switchTab("workspace");
+  } catch (error) {
+    setStatus(String(error));
+  }
 }

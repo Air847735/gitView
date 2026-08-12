@@ -426,3 +426,175 @@ fn discard_reverts_a_file_and_refuses_an_empty_list() {
     workspace::discard(&repo, &["a.txt".to_owned()]).expect("丟棄失敗");
     assert_eq!(fs::read_to_string(path.join("a.txt")).unwrap(), "one\n");
 }
+
+#[test]
+fn diff_reports_hunks_and_intra_line_changes() {
+    use gitview_core::diff::{self, DiffSource, LineKind};
+
+    let playground = Playground::new("diff");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\ntwo\nthree\n", "first");
+    fs::write(path.join("a.txt"), "one\nTWO\nthree\n").expect("無法寫入");
+
+    let diffs = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].path, "a.txt");
+    assert_eq!(diffs[0].added, 1);
+    assert_eq!(diffs[0].removed, 1);
+
+    let lines = &diffs[0].hunks[0].lines;
+    let removed = lines.iter().find(|l| l.kind == LineKind::Removed).unwrap();
+    let added = lines.iter().find(|l| l.kind == LineKind::Added).unwrap();
+    assert_eq!(removed.content, "two");
+    assert_eq!(added.content, "TWO");
+    assert!(!removed.spans.is_empty(), "應標出行內變動處");
+}
+
+#[test]
+fn staging_a_single_line_leaves_the_rest_unstaged() {
+    use gitview_core::diff::{self, DiffSource, LineKind};
+    use gitview_core::workspace::LineRef;
+
+    let playground = Playground::new("partial");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\ntwo\nthree\nfour\nfive\n", "first");
+    // 同時改第一行與最後一行，之後只暫存其中一處。
+    fs::write(path.join("a.txt"), "ONE\ntwo\nthree\nfour\nFIVE\n").expect("無法寫入");
+
+    let diffs = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    let file = &diffs[0];
+
+    // 找出「ONE」那一行與它對應的刪除行。
+    let mut selection = Vec::new();
+    for (hunk_index, hunk) in file.hunks.iter().enumerate() {
+        for (line_index, line) in hunk.lines.iter().enumerate() {
+            let touches_first = line.content == "ONE" || line.content == "one";
+            if touches_first && line.kind != LineKind::Context {
+                selection.push(LineRef {
+                    hunk: hunk_index,
+                    line: line_index,
+                });
+            }
+        }
+    }
+    assert_eq!(selection.len(), 2, "應選到一個刪除行與一個新增行");
+    workspace::stage_selection(&repo, "a.txt", &selection).expect("部分暫存失敗");
+
+    // 索引中應只有第一行被改；第五行仍是原樣。
+    let staged = diff::workspace_diff(&repo, DiffSource::Staged).expect("無法計算已暫存差異");
+    let staged_added: Vec<&str> = staged[0]
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.kind == LineKind::Added)
+        .map(|l| l.content.as_str())
+        .collect();
+    assert_eq!(staged_added, vec!["ONE"], "只有選取的那一行應進入索引");
+
+    // 工作目錄不應被動到。
+    assert_eq!(
+        fs::read_to_string(path.join("a.txt")).unwrap(),
+        "ONE\ntwo\nthree\nfour\nFIVE\n"
+    );
+
+    // 剩下的變更仍在未暫存區。
+    let remaining = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    let remaining_added: Vec<&str> = remaining[0]
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.kind == LineKind::Added)
+        .map(|l| l.content.as_str())
+        .collect();
+    assert_eq!(remaining_added, vec!["FIVE"]);
+}
+
+#[test]
+fn unstaging_a_single_line_returns_it_to_unstaged() {
+    use gitview_core::diff::{self, DiffSource, LineKind};
+    use gitview_core::workspace::LineRef;
+
+    let playground = Playground::new("partial-unstage");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\ntwo\nthree\nfour\nfive\n", "first");
+    fs::write(path.join("a.txt"), "ONE\ntwo\nthree\nfour\nFIVE\n").expect("無法寫入");
+    workspace::stage(&repo, &["a.txt".to_owned()]).expect("暫存失敗");
+
+    let staged = diff::workspace_diff(&repo, DiffSource::Staged).expect("無法計算差異");
+    let mut selection = Vec::new();
+    for (hunk_index, hunk) in staged[0].hunks.iter().enumerate() {
+        for (line_index, line) in hunk.lines.iter().enumerate() {
+            if (line.content == "FIVE" || line.content == "five") && line.kind != LineKind::Context
+            {
+                selection.push(LineRef {
+                    hunk: hunk_index,
+                    line: line_index,
+                });
+            }
+        }
+    }
+    assert_eq!(selection.len(), 2);
+    workspace::unstage_selection(&repo, "a.txt", &selection).expect("部分取消暫存失敗");
+
+    let still_staged = diff::workspace_diff(&repo, DiffSource::Staged).expect("無法計算差異");
+    let added: Vec<&str> = still_staged[0]
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.kind == LineKind::Added)
+        .map(|l| l.content.as_str())
+        .collect();
+    assert_eq!(added, vec!["ONE"], "只有未被取消的那一行應留在索引");
+}
+
+#[test]
+fn commit_diff_and_file_history_read_real_history() {
+    use gitview_core::diff;
+
+    let playground = Playground::new("history");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\n", "first");
+    write_commit(&repo, "b.txt", "other\n", "unrelated");
+    let target = write_commit(&repo, "a.txt", "one\ntwo\n", "extend a");
+
+    let files = diff::commit_diff(&repo, &target.to_string()).expect("無法讀取 commit 差異");
+    assert_eq!(files.len(), 1, "該 commit 只動到一個檔案");
+    assert_eq!(files[0].path, "a.txt");
+    assert_eq!(files[0].added, 1);
+
+    let history = diff::file_history(&repo, "a.txt", 10).expect("無法讀取檔案歷史");
+    assert_eq!(history.len(), 2, "a.txt 被兩個 commit 動過");
+    assert_eq!(history[0], target.to_string(), "最新的排最前");
+}
+
+#[test]
+fn incoming_collisions_are_marked_on_the_working_diff() {
+    use gitview_core::diff::{self, DiffSource};
+
+    let playground = Playground::new("collide");
+    // 遠端改了 shared.txt。
+    let repo = scenario(&playground, "shared.txt", "base\nremote change\n", None);
+    // 本機也在同一個檔案有未提交的變更。
+    fs::write(
+        repo.workdir().unwrap().join("shared.txt"),
+        "base\nlocal edit\n",
+    )
+    .expect("無法寫入");
+
+    let mut diffs = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    let incoming = diff::incoming_line_ranges(&repo).expect("無法計算即將進來的範圍");
+    diff::mark_incoming_collisions(&mut diffs, &incoming);
+
+    let file = diffs
+        .iter()
+        .find(|f| f.path == "shared.txt")
+        .expect("應有差異");
+    assert!(
+        file.hunks.iter().any(|hunk| hunk.collides_with_incoming),
+        "本機改的位置與即將進來的變更重疊，應被標記"
+    );
+}

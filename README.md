@@ -50,8 +50,10 @@ cargo build --release
 **命令列工具**（不需要圖形介面，適合遠端連線時使用）：
 
 ```sh
-./target/release/gitview <repository 路徑> [--limit N]
+./target/release/gitview <repository 路徑> [--limit N] [--diff]
 ```
+
+`--diff` 顯示未提交的差異，含行內變動標示與「會與即將進來的變更相撞」的警告。
 
 兩者都只讀取 repository。唯一會寫入的操作是 fetch，它只更新遠端追蹤分支，
 不會動到本機分支、工作目錄或未提交的內容。
@@ -64,7 +66,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-目前狀態：72 項測試通過；clippy 與 fmt 通過。整合測試會在系統暫存目錄
+目前狀態：111 項測試通過；clippy 與 fmt 通過。整合測試會在系統暫存目錄
 自建 repository，不接觸網路，也不接觸既有的任何 repository。
 
 尚未驗證：桌面介面的實際繪製。開發環境是無硬體加速的遠端桌面工作階段，
@@ -83,6 +85,10 @@ WebKitGTK 在其中不會把內容合成到螢幕 —— 已確認 DOM 與樣式
    - 「同步狀態」顯示即將進來的 commit、會被影響的檔案、兩側都改到的檔案，
      以及建議的處置方式。分岔時會同時畫出 rebase 與 merge 兩種結果的形狀。
    - 「歷史圖」顯示 commit 圖，分支為直線、同一線道同色、分支名稱標在線上。
+     點選任一 commit 可看它改了哪些檔案。
+   - 「變更」可檢視差異（並排或行內）、逐段或逐行暫存、提交、切換分支、
+     使用 stash。差異會標出行內實際變動的字元，以及會與即將進來的遠端變更
+     相撞的區段。
 
 ## Project Structure
 
@@ -107,8 +113,8 @@ WebKitGTK 在其中不會把內容合成到螢幕 —— 已確認 DOM 與樣式
 ## Known Limitations
 
 - 桌面介面的繪製尚未目視驗證，見上方 Verify。
-- 尚未實作基本 Git 操作（提交、分支、stash、衝突解決等），目前只讀不寫。
-  清單與分級見 `docs/spec.md`。
+- 尚未實作：分支的刪除與重新命名、互動式 rebase、cherry-pick、revert、
+  reset、blame、tag、搜尋。清單與分級見 `docs/spec.md`。
 - 無法得知另一台設備上尚未推送的內容。這是不使用伺服器的必然結果，屬已知且已接受的取捨（見 `docs/architecture.md` 的設計決策）。
 - 檔案層級的重疊偵測只能評估衝突風險，不能保證一定會或不會衝突。
 - Windows 版本無法在 Linux 上交叉建置，需要實體 Windows 環境或 CI。

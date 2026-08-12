@@ -12,12 +12,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
 use gitview_core::{
-    conflict, divergence, fetch, lay_out, ops, repo as core_repo, status, workspace,
+    conflict, diff, divergence, fetch, lay_out, ops, repo as core_repo, status, workspace,
 };
 
 use crate::dto::{
-    BranchDto, ConflictFileDto, DivergenceDto, FetchStateDto, FileChangeDto, GraphDto,
-    OpOutcomeDto, RepoStatusDto, SafetyPointDto, StashDto, WorkspaceDto,
+    BranchDto, CommitDetailDto, ConflictFileDto, DivergenceDto, FetchStateDto, FileChangeDto,
+    FileDiffDto, GraphDto, OpOutcomeDto, RepoStatusDto, SafetyPointDto, StashDto, WorkspaceDto,
 };
 use crate::settings::{self, Settings};
 
@@ -373,6 +373,105 @@ pub fn continue_operation(path: &str) -> Result<OpOutcomeDto, String> {
 
 pub fn skip_step(path: &str) -> Result<OpOutcomeDto, String> {
     run_op(path, |repo| conflict::skip_current_step(repo))
+}
+
+/// 工作目錄或索引的差異。未暫存的差異會標出與即將進來的變更相撞的區段。
+pub fn diff_of(path: &str, source: &str) -> Result<Vec<FileDiffDto>, String> {
+    let repository = open(path)?;
+    let kind = match source {
+        "staged" => diff::DiffSource::Staged,
+        _ => diff::DiffSource::Unstaged,
+    };
+    let mut diffs =
+        diff::workspace_diff(&repository, kind).map_err(|error| format!("{error:#}"))?;
+
+    if kind == diff::DiffSource::Unstaged {
+        // 撞擊標記只對尚未提交的變更有意義：那是使用者還能調整的部分。
+        if let Ok(incoming) = diff::incoming_line_ranges(&repository) {
+            diff::mark_incoming_collisions(&mut diffs, &incoming);
+        }
+    }
+    Ok(diffs.iter().map(FileDiffDto::from).collect())
+}
+
+/// 單一 commit 的詳細內容與它改動的檔案。
+pub fn commit_detail_of(path: &str, oid: &str) -> Result<CommitDetailDto, String> {
+    let repository = open(path)?;
+    let id = git2::Oid::from_str(oid).map_err(|_| "commit 識別碼格式錯誤".to_owned())?;
+    let commit = repository
+        .find_commit(id)
+        .map_err(|_| "找不到該 commit".to_owned())?;
+
+    let signature = commit.author();
+    let author = match signature.name() {
+        Ok(name) => name.to_owned(),
+        Err(_) => String::from_utf8_lossy(signature.name_bytes()).into_owned(),
+    };
+    let email = match signature.email() {
+        Ok(value) => value.to_owned(),
+        Err(_) => String::from_utf8_lossy(signature.email_bytes()).into_owned(),
+    };
+    let summary = match commit.summary() {
+        Ok(Some(text)) => text.to_owned(),
+        _ => String::new(),
+    };
+    let body = match commit.body() {
+        Ok(Some(text)) => text.to_owned(),
+        _ => String::new(),
+    };
+
+    let files = diff::commit_diff(&repository, oid)
+        .map_err(|error| format!("{error:#}"))?
+        .iter()
+        .map(FileDiffDto::from)
+        .collect();
+
+    Ok(CommitDetailDto {
+        short_oid: oid.chars().take(8).collect(),
+        oid: oid.to_owned(),
+        summary,
+        body,
+        author,
+        email,
+        timestamp: commit.time().seconds(),
+        parents: commit.parent_ids().map(|id| id.to_string()).collect(),
+        files,
+    })
+}
+
+/// 觸及某個檔案的 commit 清單。
+pub fn file_history_of(path: &str, file: &str, limit: usize) -> Result<Vec<String>, String> {
+    let repository = open(path)?;
+    diff::file_history(&repository, file, limit).map_err(|error| format!("{error:#}"))
+}
+
+fn to_line_refs(selection: Vec<(usize, usize)>) -> Vec<workspace::LineRef> {
+    selection
+        .into_iter()
+        .map(|(hunk, line)| workspace::LineRef { hunk, line })
+        .collect()
+}
+
+pub fn stage_selection(
+    path: &str,
+    file: String,
+    selection: Vec<(usize, usize)>,
+) -> Result<OpOutcomeDto, String> {
+    let refs = to_line_refs(selection);
+    run_op(path, move |repo| {
+        workspace::stage_selection(repo, &file, &refs)
+    })
+}
+
+pub fn unstage_selection(
+    path: &str,
+    file: String,
+    selection: Vec<(usize, usize)>,
+) -> Result<OpOutcomeDto, String> {
+    let refs = to_line_refs(selection);
+    run_op(path, move |repo| {
+        workspace::unstage_selection(repo, &file, &refs)
+    })
 }
 
 #[cfg(test)]

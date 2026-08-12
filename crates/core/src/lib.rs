@@ -9,6 +9,8 @@ pub mod layout;
 #[cfg(feature = "git")]
 pub mod conflict;
 #[cfg(feature = "git")]
+pub mod diff;
+#[cfg(feature = "git")]
 pub mod divergence;
 #[cfg(feature = "git")]
 pub mod fetch;
@@ -26,6 +28,8 @@ pub use layout::{assign_lanes, lay_out, topo_time_order, Edge, Layout, LayoutErr
 
 #[cfg(feature = "git")]
 pub use conflict::{ConflictFile, ConflictSide, Side};
+#[cfg(feature = "git")]
+pub use diff::{DiffLine, DiffSource, FileDiff, Hunk, LineKind};
 #[cfg(feature = "git")]
 pub use divergence::{analyse, ConflictRisk, Divergence, Recommendation};
 #[cfg(feature = "git")]

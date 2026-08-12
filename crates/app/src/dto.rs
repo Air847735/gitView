@@ -467,3 +467,96 @@ pub struct WorkspaceDto {
     pub operation: Option<String>,
     pub undo_points: Vec<SafetyPointDto>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpanDto {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffLineDto {
+    pub kind: String,
+    pub content: String,
+    pub old_lineno: Option<u32>,
+    pub new_lineno: Option<u32>,
+    pub spans: Vec<SpanDto>,
+    pub whitespace_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HunkDto {
+    pub header: String,
+    pub old_start: u32,
+    pub new_start: u32,
+    pub lines: Vec<DiffLineDto>,
+    pub whitespace_only: bool,
+    /// 這一段會與即將進來的遠端變更相撞。
+    pub collides_with_incoming: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileDiffDto {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub hunks: Vec<HunkDto>,
+    pub is_binary: bool,
+    pub added: usize,
+    pub removed: usize,
+}
+
+impl From<&gitview_core::diff::FileDiff> for FileDiffDto {
+    fn from(file: &gitview_core::diff::FileDiff) -> Self {
+        Self {
+            path: file.path.clone(),
+            old_path: file.old_path.clone(),
+            is_binary: file.is_binary,
+            added: file.added,
+            removed: file.removed,
+            hunks: file
+                .hunks
+                .iter()
+                .map(|hunk| HunkDto {
+                    header: hunk.header.clone(),
+                    old_start: hunk.old_start,
+                    new_start: hunk.new_start,
+                    whitespace_only: hunk.whitespace_only(),
+                    collides_with_incoming: hunk.collides_with_incoming,
+                    lines: hunk
+                        .lines
+                        .iter()
+                        .map(|line| DiffLineDto {
+                            kind: line.kind.as_str().to_owned(),
+                            content: line.content.clone(),
+                            old_lineno: line.old_lineno,
+                            new_lineno: line.new_lineno,
+                            spans: line
+                                .spans
+                                .iter()
+                                .map(|span| SpanDto {
+                                    start: span.start,
+                                    end: span.end,
+                                })
+                                .collect(),
+                            whitespace_only: line.whitespace_only,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// 圖上點選某個 commit 之後顯示的內容。
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitDetailDto {
+    pub oid: String,
+    pub short_oid: String,
+    pub summary: String,
+    pub body: String,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    pub parents: Vec<String>,
+    pub files: Vec<FileDiffDto>,
+}
