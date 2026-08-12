@@ -9,6 +9,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use git2::Repository;
+use gitview_core::divergence::{self, Divergence};
 use gitview_core::{lay_out, repo, CommitGraph, Layout};
 
 const DEFAULT_LIMIT: usize = 40;
@@ -122,6 +123,78 @@ fn render(graph: &CommitGraph, layout: &Layout, limit: usize) {
     }
 }
 
+/// 印出同步狀態與分岔分析。
+///
+/// 這是產品的核心功能，圖形介面不可用時需要能從命令列驗證。
+fn print_sync(divergence: &Divergence) {
+    let Some(upstream) = divergence.upstream.as_deref() else {
+        println!("  同步狀態：沒有追蹤的遠端分支");
+        return;
+    };
+
+    println!(
+        "\n同步狀態（對 {upstream}）：{}",
+        divergence.recommendation.headline()
+    );
+    println!(
+        "  本機獨有 {} 個 commit · 遠端獨有 {} 個 commit",
+        divergence.ahead.len(),
+        divergence.behind.len()
+    );
+
+    if !divergence.behind.is_empty() {
+        println!(
+            "  即將進來的變更觸及 {} 個檔案",
+            divergence.incoming_files.len()
+        );
+    }
+    if divergence.overlapping_files.is_empty() {
+        if divergence.is_diverged() {
+            println!("  兩側沒有改到同一個檔案，可以確定不會衝突");
+        }
+    } else {
+        println!(
+            "  兩側都改到的檔案 {} 個（可能衝突，非必然）：",
+            divergence.overlapping_files.len()
+        );
+        for path in divergence.overlapping_files.iter().take(8) {
+            println!("    {path}");
+        }
+        if divergence.overlapping_files.len() > 8 {
+            println!("    … 另有 {} 個", divergence.overlapping_files.len() - 8);
+        }
+    }
+    if !divergence.uncommitted_overlap.is_empty() {
+        println!(
+            "  警告：{} 個尚未提交的檔案會被進來的變更影響：",
+            divergence.uncommitted_overlap.len()
+        );
+        for path in divergence.uncommitted_overlap.iter().take(8) {
+            println!("    {path}");
+        }
+    }
+
+    if divergence.is_diverged() {
+        println!(
+            "  rebase 之後主線 {} 個 commit；merge 之後 {} 個（多一個合併節點）",
+            divergence.commits_after_rebase(),
+            divergence.commits_after_merge()
+        );
+    }
+
+    for (label, commits) in [
+        ("即將進來", &divergence.behind),
+        ("尚未推送", &divergence.ahead),
+    ] {
+        for commit in commits.iter().take(5) {
+            println!("  {label}  {}  {}", commit.short_oid, commit.summary);
+        }
+        if commits.len() > 5 {
+            println!("  {label}  … 另有 {} 個", commits.len() - 5);
+        }
+    }
+}
+
 fn run(options: Options) -> Result<()> {
     let repository = Repository::discover(&options.path)
         .with_context(|| format!("找不到 git repository：{}", options.path))?;
@@ -129,6 +202,7 @@ fn run(options: Options) -> Result<()> {
     let graph = repo::load_graph(&repository)?;
     let summary = repo::summarize(&repository, &graph)?;
     let layout = lay_out(&graph)?;
+    let divergence = divergence::analyse(&repository)?;
 
     println!("{}", summary.path);
     println!(
@@ -152,6 +226,7 @@ fn run(options: Options) -> Result<()> {
     println!();
 
     render(&graph, &layout, options.limit);
+    print_sync(&divergence);
     Ok(())
 }
 
