@@ -67,6 +67,12 @@ pub struct DiffLine {
     pub spans: Vec<Span>,
     /// 這一行的變更是否只有空白差異。
     pub whitespace_only: bool,
+    /// 配對的另一行在同一個 hunk 中的索引。
+    ///
+    /// 一行內容被修改時，diff 會表示成「刪一行 + 加一行」兩筆。兩者其實是
+    /// 同一行的前後版本，選取暫存時必須一起處理 —— 只取其中一邊會同時留下
+    /// 舊內容與新內容，產生無意義的結果。
+    pub pair: Option<usize>,
 }
 
 /// 一段連續的變更。
@@ -220,14 +226,20 @@ fn annotate_intra_line(lines: &mut [DiffLine]) {
             continue;
         }
         for offset in 0..removed_count {
-            let old_text = lines[removed_start + offset].content.clone();
-            let new_text = lines[added_start + offset].content.clone();
+            let removed_index = removed_start + offset;
+            let added_index = added_start + offset;
+            let old_text = lines[removed_index].content.clone();
+            let new_text = lines[added_index].content.clone();
             let (old_spans, new_spans) = changed_spans(&old_text, &new_text);
             let whitespace = is_whitespace_only_change(&old_text, &new_text);
-            lines[removed_start + offset].spans = old_spans;
-            lines[removed_start + offset].whitespace_only = whitespace;
-            lines[added_start + offset].spans = new_spans;
-            lines[added_start + offset].whitespace_only = whitespace;
+
+            lines[removed_index].spans = old_spans;
+            lines[removed_index].whitespace_only = whitespace;
+            lines[removed_index].pair = Some(added_index);
+
+            lines[added_index].spans = new_spans;
+            lines[added_index].whitespace_only = whitespace;
+            lines[added_index].pair = Some(removed_index);
         }
     }
 }
@@ -293,6 +305,7 @@ fn build_file_diffs(diff: &Diff<'_>) -> Result<Vec<FileDiff>> {
                     new_lineno: line.new_lineno(),
                     spans: Vec::new(),
                     whitespace_only: false,
+                    pair: None,
                 });
             }
             annotate_intra_line(&mut lines);
@@ -605,6 +618,7 @@ mod tests {
             new_lineno: None,
             spans: Vec::new(),
             whitespace_only: false,
+            pair: None,
         }
     }
 
@@ -619,6 +633,30 @@ mod tests {
         assert!(!lines[1].spans.is_empty(), "刪除行應標出變動處");
         assert!(!lines[2].spans.is_empty(), "新增行應標出變動處");
         assert!(lines[0].spans.is_empty(), "未變更的行不應被標記");
+    }
+
+    #[test]
+    fn paired_lines_reference_each_other() {
+        let mut lines = vec![
+            line(LineKind::Context, "unchanged"),
+            line(LineKind::Removed, "let a = 1;"),
+            line(LineKind::Added, "let a = 2;"),
+        ];
+        annotate_intra_line(&mut lines);
+        assert_eq!(lines[1].pair, Some(2), "刪除行應指向對應的新增行");
+        assert_eq!(lines[2].pair, Some(1), "新增行應指向對應的刪除行");
+        assert_eq!(lines[0].pair, None, "未變更的行沒有配對");
+    }
+
+    #[test]
+    fn unpaired_changes_have_no_partner() {
+        let mut lines = vec![
+            line(LineKind::Removed, "old"),
+            line(LineKind::Added, "new one"),
+            line(LineKind::Added, "new two"),
+        ];
+        annotate_intra_line(&mut lines);
+        assert!(lines.iter().all(|line| line.pair.is_none()));
     }
 
     #[test]

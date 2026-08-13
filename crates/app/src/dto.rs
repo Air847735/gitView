@@ -482,6 +482,8 @@ pub struct DiffLineDto {
     pub new_lineno: Option<u32>,
     pub spans: Vec<SpanDto>,
     pub whitespace_only: bool,
+    /// 配對的另一行在同一個 hunk 中的索引；選取時必須一起處理。
+    pub pair: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -539,6 +541,7 @@ impl From<&gitview_core::diff::FileDiff> for FileDiffDto {
                                 })
                                 .collect(),
                             whitespace_only: line.whitespace_only,
+                            pair: line.pair,
                         })
                         .collect(),
                 })

@@ -598,3 +598,78 @@ fn incoming_collisions_are_marked_on_the_working_diff() {
         "本機改的位置與即將進來的變更重疊，應被標記"
     );
 }
+
+#[test]
+fn paired_lines_are_linked_so_the_interface_can_select_them_together() {
+    use gitview_core::diff::{self, DiffSource, LineKind};
+
+    let playground = Playground::new("pairing");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\ntwo\nthree\n", "first");
+    fs::write(path.join("a.txt"), "one\nTWO\nthree\n").expect("無法寫入");
+
+    let diffs = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    let hunk = &diffs[0].hunks[0];
+
+    let removed = hunk
+        .lines
+        .iter()
+        .position(|line| line.kind == LineKind::Removed)
+        .expect("應有刪除行");
+    let added = hunk
+        .lines
+        .iter()
+        .position(|line| line.kind == LineKind::Added)
+        .expect("應有新增行");
+
+    // 兩者互相指涉，介面才能一起選取。只選其中一邊會讓索引同時留下
+    // 舊內容與新內容，產生無意義的結果。
+    assert_eq!(hunk.lines[removed].pair, Some(added));
+    assert_eq!(hunk.lines[added].pair, Some(removed));
+}
+
+#[test]
+fn staging_only_one_side_of_a_pair_produces_both_lines() {
+    use gitview_core::diff::{self, DiffSource, LineKind};
+    use gitview_core::workspace::LineRef;
+
+    let playground = Playground::new("half-pair");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\ntwo\nthree\n", "first");
+    fs::write(path.join("a.txt"), "one\nTWO\nthree\n").expect("無法寫入");
+
+    let diffs = diff::workspace_diff(&repo, DiffSource::Unstaged).expect("無法計算差異");
+    let added = diffs[0].hunks[0]
+        .lines
+        .iter()
+        .position(|line| line.kind == LineKind::Added)
+        .unwrap();
+
+    // 只暫存新增行、不暫存對應的刪除行。這是使用者實際踩到的情況：
+    // 結果會同時保留舊行與新行。此測試把這個行為釘住，
+    // 說明為什麼介面必須成對選取。
+    workspace::stage_selection(
+        &repo,
+        "a.txt",
+        &[LineRef {
+            hunk: 0,
+            line: added,
+        }],
+    )
+    .expect("暫存失敗");
+
+    let staged = diff::workspace_diff(&repo, DiffSource::Staged).expect("無法計算差異");
+    let added_lines: Vec<&str> = staged[0].hunks[0]
+        .lines
+        .iter()
+        .filter(|line| line.kind == LineKind::Added)
+        .map(|line| line.content.as_str())
+        .collect();
+    assert_eq!(
+        added_lines,
+        vec!["TWO"],
+        "索引會同時含有 two 與 TWO —— 這正是只選一邊的後果"
+    );
+}

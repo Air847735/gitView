@@ -1178,10 +1178,24 @@ function lineKey(hunkIndex, lineIndex) {
   return `${hunkIndex}:${lineIndex}`;
 }
 
+/**
+ * 切換一行的選取狀態，並連同它的配對行一起切換。
+ *
+ * 一行內容被修改時，diff 是「刪一行 + 加一行」兩筆。只選其中一邊會讓索引
+ * 同時留下舊內容與新內容，結果沒有意義。因此配對的兩行永遠同進同出。
+ */
 function toggleLine(hunkIndex, lineIndex) {
-  const key = lineKey(hunkIndex, lineIndex);
-  if (state.selectedLines.has(key)) state.selectedLines.delete(key);
-  else state.selectedLines.add(key);
+  const file = (state.diffFiles || []).find((item) => item.path === state.selectedFile);
+  const line = file && file.hunks[hunkIndex] && file.hunks[hunkIndex].lines[lineIndex];
+  const indices = [lineIndex];
+  if (line && line.pair !== null && line.pair !== undefined) indices.push(line.pair);
+
+  const turningOn = !state.selectedLines.has(lineKey(hunkIndex, lineIndex));
+  for (const index of indices) {
+    const key = lineKey(hunkIndex, index);
+    if (turningOn) state.selectedLines.add(key);
+    else state.selectedLines.delete(key);
+  }
   renderDiffPanel();
 }
 
