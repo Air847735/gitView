@@ -15,6 +15,15 @@ use service::AppState;
 
 fn main() {
     tauri::Builder::default()
+        // 只允許一個實例。關閉視窗只是隱藏、程序仍在背景執行，
+        // 若不擋住重複啟動，使用者每次點圖示都會多開一個常駐程序。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -70,6 +79,7 @@ fn main() {
             commands::file_history,
             commands::op_stage_selection,
             commands::op_unstage_selection,
+            commands::ui_probe,
         ])
         .run(tauri::generate_context!())
         .expect("gitview 啟動失敗");

@@ -122,6 +122,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   font-size: 0.82rem;
   color: var(--ink-soft);
   font-family: var(--mono);
+  /* 長訊息會把工具列撐開並把按鈕擠掉，因此限制寬度並省略超出的部分。
+     完整內容會顯示在明細區的訊息框。 */
+  max-width: 26rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- 設定 ---- */

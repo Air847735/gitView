@@ -217,3 +217,16 @@ pub fn op_unstage_selection(
 ) -> Result<OpOutcomeDto, String> {
     service::unstage_selection(&path, file, selection)
 }
+
+/// 測試用探針：接收前端回報的元素座標。
+///
+/// 僅在環境變數 `GITVIEW_UI_PROBE` 設定時寫檔，一般執行不做任何事。
+/// 用途是讓自動化測試能依按鈕文字精準定位，而不是猜座標。
+#[tauri::command]
+pub fn ui_probe(items: String) {
+    if std::env::var_os("GITVIEW_UI_PROBE").is_none() {
+        return;
+    }
+    let path = std::env::temp_dir().join("gitview-ui-probe.json");
+    let _ = std::fs::write(path, items);
+}

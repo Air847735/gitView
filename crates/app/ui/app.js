@@ -56,8 +56,17 @@ function laneColour(index) {
   return styles.getPropertyValue(`--lane-${index % LANE_COLOURS}`).trim() || "#888";
 }
 
+/**
+ * 工具列的狀態文字。
+ *
+ * 只放簡短的進度提示；詳細的成功或失敗訊息由明細區的訊息框負責，
+ * 兩邊都寫長訊息會重複且把工具列撐爆。
+ */
 function setStatus(text) {
-  el("global-status").textContent = text || "";
+  const node = el("global-status");
+  const value = text || "";
+  node.textContent = value;
+  node.title = value;
 }
 
 function relativeTime(millis) {
@@ -132,6 +141,7 @@ function renderRepoList() {
     card.append(top, bottom);
     container.appendChild(card);
   }
+  reportProbe();
 }
 
 /* ---------- 同步狀態 ---------- */
@@ -255,7 +265,12 @@ function renderDivergence(data) {
   title.textContent = data.recommendation_headline;
   const detail = document.createElement("p");
 
-  if (data.recommendation === "no-upstream") {
+  const operation = state.workspace && state.workspace.operation;
+  if (operation) {
+    // 操作進行中時 HEAD 通常是 detached，比較的結果沒有意義。
+    title.textContent = `${operation}，尚未結束`;
+    detail.textContent = "完成或中止之後才會重新比較與遠端的差異。";
+  } else if (data.recommendation === "no-upstream") {
     detail.textContent = "這個分支沒有對應的遠端分支，因此無從比較。";
   } else if (data.recommendation === "up-to-date") {
     detail.textContent = `與 ${data.upstream} 完全一致，沒有待處理的事項。`;
@@ -444,7 +459,10 @@ async function renderDetail() {
   const repo = currentRepo();
   el("detail-empty").hidden = Boolean(repo);
   el("detail-body").hidden = !repo;
-  if (!repo) return;
+  if (!repo) {
+    reportProbe();
+    return;
+  }
 
   el("detail-name").textContent = repo.name;
   el("detail-path").textContent = repo.path;
@@ -458,6 +476,21 @@ async function renderDetail() {
     box.textContent = repo.error;
     divergencePanel.appendChild(box);
     return;
+  }
+
+  // 操作結束後不要停在已經隱藏的分頁：分頁按鈕會消失，但內容還留著，
+  // 使用者會看不到後續該按的按鈕。
+  const busy = state.workspace
+    && (state.workspace.conflicts.length > 0 || state.workspace.operation);
+  if (state.tab === "conflicts" && !busy) {
+    state.tab = "divergence";
+    for (const name of TAB_PANELS) {
+      const panel = el(`tab-${name}`);
+      if (panel) panel.hidden = name !== state.tab;
+    }
+    for (const button of document.querySelectorAll(".tab")) {
+      button.classList.toggle("active", button.dataset.tab === state.tab);
+    }
   }
 
   updateConflictBanner();
@@ -485,6 +518,7 @@ async function renderDetail() {
       el("graph-meta").textContent = String(error);
     }
   }
+  reportProbe();
 }
 
 /** 有衝突或有進行中的操作時，在最上方明確提示並提供入口。 */
@@ -577,7 +611,18 @@ async function pushSettings() {
 
 /* ---------- 啟動 ---------- */
 
+let probeTimer = null;
+
 function wireEvents() {
+  // 捲動不會觸發重繪，但元素位置會變；自動化測試需要更新後的座標。
+  const detail = document.querySelector(".detail");
+  if (detail) {
+    detail.addEventListener("scroll", () => {
+      clearTimeout(probeTimer);
+      probeTimer = setTimeout(reportProbe, 120);
+    }, { passive: true });
+  }
+
   el("add-repo").addEventListener("click", async () => {
     let chosen = await pickDirectory("選擇 repository");
     if (chosen === null) {
@@ -666,6 +711,7 @@ function confirmAction(title, detail) {
     el("confirm-detail").textContent = detail;
     backdrop.hidden = false;
     el("confirm-ok").focus();
+    setTimeout(reportProbe, 0);
 
     const finish = (answer) => {
       backdrop.hidden = true;
@@ -695,7 +741,7 @@ async function runOp(command, args, confirm) {
   clearOpError();
   try {
     const outcome = await invoke(command, args);
-    setStatus(outcome.message);
+    setStatus("完成");
     await refresh();
     await loadWorkspace();
     await renderDetail();
@@ -703,8 +749,8 @@ async function runOp(command, args, confirm) {
     return outcome;
   } catch (error) {
     // 操作失敗必須明顯：只寫在角落的狀態列會被忽略，
-    // 使用者會以為按鈕沒反應。
-    setStatus(String(error));
+    // 使用者會以為按鈕沒反應。詳細內容放訊息框，工具列只留一句。
+    setStatus("操作失敗");
     showOpResult(String(error), true);
     return null;
   }
@@ -739,6 +785,8 @@ function renderOpResult() {
     renderOpResult();
   });
   holder.append(text, close);
+  // 訊息框會把下方內容推移，座標必須重新回報。
+  setTimeout(reportProbe, 0);
 }
 
 async function loadWorkspace() {
@@ -798,15 +846,10 @@ function syncActions(data) {
   }
   if (data.ahead.length > 0 && data.behind.length === 0) {
     bar.appendChild(button("推送", () => runOp("op_push", { path }), "primary"));
-  } else if (data.ahead.length > 0) {
-    bar.appendChild(
-      button("強制推送", () =>
-        runOp("op_push", { path, force: true }, {
-          title: "強制推送",
-          detail: "會覆寫遠端的分支。程式會先確認遠端沒有被別人推過，若有則中止。",
-        }), "danger")
-    );
   }
+  // 落後遠端時刻意不提供強制推送：此時強推會把遠端已有的 commit 直接丟掉，
+  // 而 force-with-lease 的檢查擋不住這種情況 —— 遠端的位置與本機記錄一致，
+  // 只是本機還沒把它整合進來。要推之前必須先整合。
   if (blocked) {
     bar.appendChild(
       button("先把變更擱置起來", () => runOp("op_stash_save", { path, message: "整合前擱置" }))
@@ -954,6 +997,15 @@ function renderWorkspace() {
     sourceBar.appendChild(info);
   }
   panel.appendChild(sourceBar);
+
+  if (state.diffFiles.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "action-note";
+    empty.textContent = state.diffSource === "staged"
+      ? "沒有已加入索引的變更。"
+      : "沒有未暫存的變更。已加入索引的變更請切到「已暫存」檢視。";
+    panel.appendChild(empty);
+  }
 
   const diffLayout = document.createElement("div");
   diffLayout.className = "diff-layout";
@@ -1311,6 +1363,7 @@ function selectionForStaging() {
 function renderDiffPanel() {
   const holder = el("diff-panel");
   if (!holder) return;
+  setTimeout(reportProbe, 0);
   holder.replaceChildren();
 
   const repo = currentRepo();
@@ -1485,4 +1538,35 @@ async function showCommitDetail(oid) {
   } catch (error) {
     setStatus(String(error));
   }
+}
+
+
+/* ---------- 測試探針 ---------- */
+
+/**
+ * 回報畫面上可互動元素的位置與文字。
+ *
+ * 只有在後端設定了 GITVIEW_UI_PROBE 時才會被寫入檔案，一般執行不留痕跡。
+ * 目的是讓自動化測試依按鈕文字定位，而不是靠座標猜測 —— 版面一改，
+ * 猜的座標就全錯。
+ */
+function reportProbe() {
+  if (!invoke) return;
+  const items = [];
+  const selector = "button, input, textarea, select, .repo-card, .conflict-files button, .diff-row, .diff-cell";
+  for (const node of document.querySelectorAll(selector)) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    items.push({
+      text: (node.textContent || node.value || "").trim().slice(0, 60),
+      tag: node.tagName.toLowerCase(),
+      id: node.id || "",
+      cls: typeof node.className === "string" ? node.className : "",
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    });
+  }
+  invoke("ui_probe", { items: JSON.stringify(items) }).catch(() => {});
 }
