@@ -1,4 +1,4 @@
-//! 工作區操作：暫存、提交、分支、stash、丟棄。
+//! 工作區操作：暫存（加入索引）、提交、分支、擱置（stash）、丟棄。
 //!
 //! 與 [`crate::ops`] 同樣會寫入使用者的工作成果，遵循相同的規則：
 //! 前置條件不符就拒絕，會消滅內容的操作交由呼叫端先取得確認。
@@ -335,16 +335,16 @@ pub fn stash_save(repo: &mut Repository, message: &str) -> Result<OpOutcome> {
         .signature()
         .context("無法取得身分，請確認 git 的 user.name 與 user.email 已設定")?;
     let label = if message.trim().is_empty() {
-        "gitview 暫存"
+        "gitview 擱置"
     } else {
         message
     };
     let oid = repo
         .stash_save(&signature, label, Some(git2::StashFlags::INCLUDE_UNTRACKED))
-        .context("沒有可暫存的變更，或暫存失敗")?;
+        .context("沒有可擱置的變更，或擱置失敗")?;
 
     Ok(OpOutcome {
-        message: format!("已暫存為 {}", &oid.to_string()[..8]),
+        message: format!("已擱置為 {}", &oid.to_string()[..8]),
         undo: None,
     })
 }
@@ -352,9 +352,9 @@ pub fn stash_save(repo: &mut Repository, message: &str) -> Result<OpOutcome> {
 /// 取出指定的 stash 並從清單移除。
 pub fn stash_pop(repo: &mut Repository, index: usize) -> Result<OpOutcome> {
     repo.stash_pop(index, None)
-        .with_context(|| format!("無法取出第 {index} 筆暫存（可能與目前的內容衝突）"))?;
+        .with_context(|| format!("無法取回第 {index} 筆擱置（可能與目前的內容衝突）"))?;
     Ok(OpOutcome {
-        message: "已取出暫存的變更".to_owned(),
+        message: "已取回擱置的變更".to_owned(),
         undo: None,
     })
 }
@@ -364,9 +364,9 @@ pub fn stash_pop(repo: &mut Repository, index: usize) -> Result<OpOutcome> {
 /// **內容會永久消失。** 呼叫端必須先取得確認。
 pub fn stash_drop(repo: &mut Repository, index: usize) -> Result<OpOutcome> {
     repo.stash_drop(index)
-        .with_context(|| format!("無法刪除第 {index} 筆暫存"))?;
+        .with_context(|| format!("無法刪除第 {index} 筆擱置"))?;
     Ok(OpOutcome {
-        message: "已刪除暫存".to_owned(),
+        message: "已刪除擱置".to_owned(),
         undo: None,
     })
 }

@@ -266,7 +266,7 @@ function renderDivergence(data) {
   } else if (data.recommendation === "resolve-working-tree") {
     detail.textContent =
       `即將進來的變更會碰到 ${data.uncommitted_overlap.length} 個你尚未提交的檔案。` +
-      "先提交或暫存這些變更，否則可能遺失工作內容。";
+      "先提交或擱置這些變更，否則可能遺失工作內容。";
   } else if (data.risk === "none") {
     detail.textContent =
       `本機 ${data.ahead.length} 個、遠端 ${data.behind.length} 個 commit，兩側沒有改到同一個檔案，` +
@@ -809,7 +809,7 @@ function syncActions(data) {
   }
   if (blocked) {
     bar.appendChild(
-      button("先把變更暫存起來", () => runOp("op_stash_save", { path, message: "整合前自動暫存" }))
+      button("先把變更擱置起來", () => runOp("op_stash_save", { path, message: "整合前擱置" }))
     );
   }
 
@@ -829,7 +829,7 @@ function syncActions(data) {
   if (blocked) {
     const note = document.createElement("div");
     note.className = "action-note";
-    note.textContent = "工作目錄有未提交的變更，整合前需要先提交或暫存。";
+    note.textContent = "工作目錄有變更（含已加入索引的），整合前需要先提交或擱置。";
     bar.appendChild(note);
   }
   return bar;
@@ -873,6 +873,10 @@ function renderWorkspace() {
 
   // 變更清單
   panel.appendChild(heading(`工作目錄的變更（${data.changes.length}）`));
+  const stageNote = document.createElement("p");
+  stageNote.className = "action-note";
+  stageNote.textContent = "「暫存」是把變更加入索引，準備一起提交。";
+  panel.appendChild(stageNote);
   if (data.changes.length === 0) {
     const empty = document.createElement("p");
     empty.className = "action-note";
@@ -1002,10 +1006,17 @@ function renderWorkspace() {
   panel.appendChild(box);
 
   // Stash
-  panel.appendChild(heading(`暫存（${data.stashes.length}）`));
+  panel.appendChild(heading(`擱置的變更（${data.stashes.length}）`));
+  const stashNote = document.createElement("p");
+  stashNote.className = "action-note";
+  stashNote.textContent =
+    "「擱置」是把變更整批收起來、讓工作目錄回到乾淨狀態，之後可以再取回。" +
+    "整合遠端內容之前若不想先提交，就用這個。";
+  panel.appendChild(stashNote);
+
   const stashBar = document.createElement("div");
   stashBar.className = "action-bar";
-  stashBar.appendChild(button("把目前的變更暫存起來", () => runOp("op_stash_save", { path, message: "" })));
+  stashBar.appendChild(button("把目前的變更擱置起來", () => runOp("op_stash_save", { path, message: "" })));
   panel.appendChild(stashBar);
   if (data.stashes.length > 0) {
     const list = document.createElement("div");
@@ -1017,10 +1028,10 @@ function renderWorkspace() {
       text.className = "path";
       text.textContent = stash.message;
       row.append(text,
-        button("取出", () => runOp("op_stash_pop", { path, index: stash.index })),
+        button("取回", () => runOp("op_stash_pop", { path, index: stash.index })),
         button("刪除", () =>
           runOp("op_stash_drop", { path, index: stash.index }, {
-            title: "刪除這筆暫存",
+            title: "刪除這筆擱置",
             detail: "裡面的內容會永久消失。",
           }), "ghost danger"));
       list.appendChild(row);

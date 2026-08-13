@@ -213,7 +213,7 @@ pub fn fast_forward(repo: &Repository) -> Result<OpOutcome> {
         bail!("本機有 {ahead} 個遠端沒有的 commit，無法快轉；請改用 rebase 或 merge");
     }
     if has_uncommitted_changes(repo)? {
-        bail!("工作目錄有未提交的變更，請先提交或暫存");
+        bail!("工作目錄有未提交或已加入索引但未提交的變更，請先提交或擱置");
     }
 
     let point = create_safety_point(repo, "fast-forward")?;
@@ -239,7 +239,7 @@ pub fn fast_forward(repo: &Repository) -> Result<OpOutcome> {
 pub fn rebase_onto_upstream(repo: &Repository) -> Result<OpOutcome> {
     ensure_no_operation_in_progress(repo)?;
     if has_uncommitted_changes(repo)? {
-        bail!("工作目錄有未提交的變更，請先提交或暫存後再 rebase");
+        bail!("工作目錄有未提交或已加入索引但未提交的變更，請先提交或擱置後再 rebase");
     }
     let upstream = upstream_commit(repo)?;
     let local = head_commit_oid(repo)?;
@@ -298,7 +298,7 @@ pub fn rebase_onto_upstream(repo: &Repository) -> Result<OpOutcome> {
 pub fn merge_upstream(repo: &Repository) -> Result<OpOutcome> {
     ensure_no_operation_in_progress(repo)?;
     if has_uncommitted_changes(repo)? {
-        bail!("工作目錄有未提交的變更，請先提交或暫存後再合併");
+        bail!("工作目錄有未提交或已加入索引但未提交的變更，請先提交或擱置後再合併");
     }
     let upstream = upstream_commit(repo)?;
     let local = head_commit_oid(repo)?;
