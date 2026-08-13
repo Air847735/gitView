@@ -673,3 +673,66 @@ fn staging_only_one_side_of_a_pair_produces_both_lines() {
         "索引會同時含有 two 與 TWO —— 這正是只選一邊的後果"
     );
 }
+
+#[test]
+fn resolving_by_taking_theirs_skips_the_now_empty_commit() {
+    let playground = Playground::new("empty-step");
+    // 兩側改同一行 → rebase 必定衝突。
+    let repo = scenario(
+        &playground,
+        "shared.txt",
+        "remote version\n",
+        Some(("shared.txt", "local version\n")),
+    );
+
+    ops::rebase_onto_upstream(&repo).expect("應停在衝突");
+
+    // rebase 時 ours 是被接上去的基底（遠端側）。採用它之後，
+    // 本機這個 commit 的內容完全被涵蓋，套用後不會有任何改變
+    // —— 這是使用者實際踩到的情況。
+    conflict::resolve_using(&repo, "shared.txt", Side::Ours).expect("解決失敗");
+
+    let outcome = conflict::continue_operation(&repo).expect("應能完成而非報錯");
+    assert!(
+        outcome.message.contains("略過"),
+        "應說明有步驟因為變成空的而被略過，實際訊息：{}",
+        outcome.message
+    );
+    assert_eq!(
+        repo.state(),
+        git2::RepositoryState::Clean,
+        "rebase 應已結束"
+    );
+
+    // 內容應為對方的版本。
+    let content = fs::read_to_string(repo.workdir().unwrap().join("shared.txt")).unwrap();
+    assert_eq!(content, "remote version\n");
+}
+
+#[test]
+fn during_rebase_ours_is_the_upstream_side() {
+    let playground = Playground::new("side-meaning");
+    let repo = scenario(
+        &playground,
+        "shared.txt",
+        "remote version\n",
+        Some(("shared.txt", "local version\n")),
+    );
+    ops::rebase_onto_upstream(&repo).expect("應停在衝突");
+
+    let files = conflict::conflicts(&repo).expect("無法列出衝突");
+    let file = &files[0];
+
+    // git 在 rebase 時的慣例與直覺相反：
+    // ours 是「被接上去的那一端」（遠端），theirs 才是「正在重放的你的 commit」。
+    assert_eq!(
+        file.ours.text.as_deref(),
+        Some("remote version\n"),
+        "rebase 時 ours 應為遠端的內容"
+    );
+    assert_eq!(
+        file.theirs.text.as_deref(),
+        Some("local version\n"),
+        "rebase 時 theirs 應為本機的內容"
+    );
+}

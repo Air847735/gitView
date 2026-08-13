@@ -276,6 +276,7 @@ pub fn workspace_of(path: &str) -> Result<WorkspaceDto, String> {
         conflicts,
         operation,
         undo_points,
+        side_labels: conflict::side_labels(&repository).into(),
     })
 }
 

@@ -46,6 +46,43 @@ pub struct ConflictFile {
     pub is_binary: bool,
 }
 
+/// 兩側在目前操作下的實際意義。
+///
+/// git 的 ours / theirs 在 rebase 時與直覺相反：ours 是被接上去的那一端
+/// （也就是遠端的內容），theirs 才是正在重放的自己的 commit。把這兩個字
+/// 直接翻成「我的」與「他們的」會讓使用者選錯邊，因此標籤必須依操作決定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SideLabels {
+    pub ours: String,
+    pub theirs: String,
+    /// 一句話說明目前的處境。
+    pub note: String,
+}
+
+/// 依目前進行中的操作決定兩側的說法。
+pub fn side_labels(repo: &Repository) -> SideLabels {
+    match repo.state() {
+        git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseMerge
+        | git2::RepositoryState::RebaseInteractive => SideLabels {
+            ours: "接上去的基底（遠端已有的內容）".to_owned(),
+            theirs: "你的 commit（正在被重新套用）".to_owned(),
+            note: "rebase 是把你的 commit 逐一接到遠端內容之後，                   因此「基底」是遠端那一邊。"
+                .to_owned(),
+        },
+        git2::RepositoryState::Merge => SideLabels {
+            ours: "你目前的分支".to_owned(),
+            theirs: "併入的內容（遠端）".to_owned(),
+            note: "合併是把對方的內容併進你的分支。".to_owned(),
+        },
+        _ => SideLabels {
+            ours: "目前的版本".to_owned(),
+            theirs: "另一個版本".to_owned(),
+            note: String::new(),
+        },
+    }
+}
+
 /// 解決衝突時採用的版本。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -193,6 +230,21 @@ pub fn resolve_using(repo: &Repository, path: &str, side: Side) -> Result<OpOutc
     }
 }
 
+/// 提交 rebase 的目前這一步。
+///
+/// 解決衝突時若採用了對方的版本，這個 commit 的變更可能完全被涵蓋，
+/// 套用後內容沒有任何改變。libgit2 會回報「已套用過」，此時正確的處置
+/// 是略過它而不是視為錯誤 —— 使用者的意圖已經達成了。
+///
+/// 回傳 `true` 表示確實建立了 commit，`false` 表示這一步是空的而被略過。
+fn commit_step(rebase: &mut git2::Rebase<'_>, signature: &git2::Signature<'_>) -> Result<bool> {
+    match rebase.commit(None, signature, None) {
+        Ok(_) => Ok(true),
+        Err(error) if error.code() == git2::ErrorCode::Applied => Ok(false),
+        Err(error) => Err(anyhow::anyhow!("無法提交這一步：{}", error.message())),
+    }
+}
+
 /// 是否所有衝突都已解決。
 pub fn all_resolved(repo: &Repository) -> Result<bool> {
     let index = repo.index().context("無法取得索引")?;
@@ -214,27 +266,41 @@ pub fn continue_operation(repo: &Repository) -> Result<OpOutcome> {
         | git2::RepositoryState::RebaseInteractive => {
             let mut rebase = repo.open_rebase(None).context("無法開啟進行中的 rebase")?;
             // 先把目前這一步提交，再繼續走完剩下的。
-            rebase
-                .commit(None, &signature, None)
-                .context("無法提交目前這一步")?;
+            let mut applied = 0;
+            let mut skipped = 0;
+            if commit_step(&mut rebase, &signature)? {
+                applied += 1;
+            } else {
+                skipped += 1;
+            }
 
-            let mut applied = 1;
             while let Some(step) = rebase.next() {
                 step.context("rebase 過程發生錯誤")?;
                 if repo.index().is_ok_and(|index| index.has_conflicts()) {
                     return Ok(OpOutcome {
-                        message: format!("又遇到衝突，已停在第 {} 步等待處理", applied + 1),
+                        message: format!(
+                            "又遇到衝突，已停在第 {} 步等待處理",
+                            applied + skipped + 1
+                        ),
                         undo: None,
                     });
                 }
-                rebase
-                    .commit(None, &signature, None)
-                    .context("無法建立 rebase 後的 commit")?;
-                applied += 1;
+                if commit_step(&mut rebase, &signature)? {
+                    applied += 1;
+                } else {
+                    skipped += 1;
+                }
             }
             rebase.finish(Some(&signature)).context("無法完成 rebase")?;
+
+            let mut message = format!("rebase 完成，共套用 {applied} 個 commit");
+            if skipped > 0 {
+                message.push_str(&format!(
+                    "；另有 {skipped} 個因為解決衝突後內容變成空的而略過"
+                ));
+            }
             Ok(OpOutcome {
-                message: format!("rebase 完成，共套用 {applied} 個 commit"),
+                message,
                 undo: None,
             })
         }

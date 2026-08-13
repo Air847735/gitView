@@ -1105,12 +1105,22 @@ function renderConflicts() {
   const detail = document.createElement("div");
   const current = files.find((file) => file.path === state.selectedConflict);
 
+  // 標籤依當下的操作決定：rebase 時 ours 其實是遠端那一邊，
+  // 寫死成「我的／他們的」會讓人選錯邊。
+  const labels = data.side_labels || { ours: "目前的版本", theirs: "另一個版本", note: "" };
+  if (labels.note) {
+    const note = document.createElement("p");
+    note.className = "action-note";
+    note.textContent = labels.note;
+    detail.appendChild(note);
+  }
+
   const sides = document.createElement("div");
   sides.className = "side-by-side";
   sides.append(
-    sidePane("我的版本", current.ours, () =>
+    sidePane(labels.ours, current.ours, () =>
       runOp("op_resolve_conflict", { path, file: current.path, side: "ours" })),
-    sidePane("他們的版本", current.theirs, () =>
+    sidePane(labels.theirs, current.theirs, () =>
       runOp("op_resolve_conflict", { path, file: current.path, side: "theirs" }))
   );
   detail.appendChild(sides);

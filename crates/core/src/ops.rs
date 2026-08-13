@@ -277,10 +277,14 @@ pub fn rebase_onto_upstream(repo: &Repository) -> Result<OpOutcome> {
                 undo: Some(point),
             });
         }
-        rebase
-            .commit(None, &signature, None)
-            .context("無法建立 rebase 後的 commit")?;
-        applied += 1;
+        // 內容變成空的步驟略過，不視為錯誤。
+        match rebase.commit(None, &signature, None) {
+            Ok(_) => applied += 1,
+            Err(error) if error.code() == git2::ErrorCode::Applied => {}
+            Err(error) => {
+                anyhow::bail!("無法建立 rebase 後的 commit：{}", error.message())
+            }
+        }
     }
     rebase.finish(Some(&signature)).context("無法完成 rebase")?;
 

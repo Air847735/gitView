@@ -456,6 +456,23 @@ impl From<&gitview_core::conflict::ConflictFile> for ConflictFileDto {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SideLabelsDto {
+    pub ours: String,
+    pub theirs: String,
+    pub note: String,
+}
+
+impl From<gitview_core::conflict::SideLabels> for SideLabelsDto {
+    fn from(labels: gitview_core::conflict::SideLabels) -> Self {
+        Self {
+            ours: labels.ours,
+            theirs: labels.theirs,
+            note: labels.note,
+        }
+    }
+}
+
 /// 單一 repository 的工作區狀態，一次取回介面需要的全部資料。
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceDto {
@@ -466,6 +483,8 @@ pub struct WorkspaceDto {
     /// 進行中的操作名稱，例如 `rebase 中`；沒有時為 `null`。
     pub operation: Option<String>,
     pub undo_points: Vec<SafetyPointDto>,
+    /// 衝突兩側在目前操作下的實際意義。
+    pub side_labels: SideLabelsDto,
 }
 
 #[derive(Debug, Clone, Serialize)]
