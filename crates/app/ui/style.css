@@ -67,6 +67,12 @@
 
 * { box-sizing: border-box; }
 
+/* hidden 屬性必須勝過任何作者樣式。
+   瀏覽器預設的 [hidden] { display: none } 優先度低於一般類別選擇器，
+   因此只要類別上設了 display，hidden 就會失效 —— 元素會一直顯示。
+   這裡以 !important 把它釘死，讓 HTML 的 hidden 成為可靠的開關。 */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--sans);
