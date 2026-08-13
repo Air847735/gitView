@@ -44,6 +44,7 @@ const state = {
   diffSource: "unstaged",
   selectedLines: new Set(),
   commitDetail: null,
+  lastOpResult: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -460,6 +461,7 @@ async function renderDetail() {
   }
 
   updateConflictBanner();
+  renderOpResult();
 
   if (state.tab === "divergence") {
     try {
@@ -690,17 +692,53 @@ function confirmAction(title, detail) {
 async function runOp(command, args, confirm) {
   if (confirm && !(await confirmAction(confirm.title, confirm.detail))) return null;
   setStatus("執行中…");
+  clearOpError();
   try {
     const outcome = await invoke(command, args);
     setStatus(outcome.message);
     await refresh();
     await loadWorkspace();
     await renderDetail();
+    showOpResult(outcome.message, false);
     return outcome;
   } catch (error) {
+    // 操作失敗必須明顯：只寫在角落的狀態列會被忽略，
+    // 使用者會以為按鈕沒反應。
     setStatus(String(error));
+    showOpResult(String(error), true);
     return null;
   }
+}
+
+/** 上一次操作的結果，顯示在明細區最上方。 */
+function clearOpError() {
+  state.lastOpResult = null;
+}
+
+function showOpResult(message, isError) {
+  state.lastOpResult = { message, isError };
+  renderOpResult();
+}
+
+function renderOpResult() {
+  const holder = el("op-result");
+  if (!holder) return;
+  const result = state.lastOpResult;
+  holder.hidden = !result;
+  if (!result) return;
+  holder.className = result.isError ? "op-result error" : "op-result ok";
+  holder.replaceChildren();
+  const text = document.createElement("span");
+  text.textContent = result.message;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "ghost";
+  close.textContent = "關閉";
+  close.addEventListener("click", () => {
+    state.lastOpResult = null;
+    renderOpResult();
+  });
+  holder.append(text, close);
 }
 
 async function loadWorkspace() {
@@ -734,7 +772,10 @@ function syncActions(data) {
   bar.className = "action-bar";
   const path = repo.path;
   const dirty = repo.working_tree.total > 0;
-  const blocked = dirty && (data.recommendation === "rebase" || data.recommendation === "fast-forward");
+  // 只要有東西要整合而工作目錄不乾淨，就是被擋住的狀態。
+  // 先前只看建議是不是 rebase 或快轉，但「請先處理未提交的變更」這個建議
+  // 正好是最需要暫存按鈕的情況，卻因此不顯示。
+  const blocked = dirty && (data.behind.length > 0 || data.is_diverged);
 
   if (data.recommendation === "fast-forward") {
     bar.appendChild(button("拉取（快轉）", () => runOp("op_fast_forward", { path }), "primary"));

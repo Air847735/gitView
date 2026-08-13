@@ -667,3 +667,18 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   min-height: 1.55em;
 }
 .diff-cell.empty { background: var(--surface-2); opacity: 0.4; }
+
+/* ---- 操作結果 ---- */
+.op-result {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+  border: 1px solid;
+}
+.op-result span { flex: 1; }
+.op-result.ok { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
+.op-result.error { border-color: var(--attention); color: var(--attention); background: var(--surface); }
