@@ -525,13 +525,20 @@ async function selectRepo(path) {
   await renderDetail();
 }
 
+/** 所有分頁面板的識別碼，順序與工具列上的按鈕一致。 */
+const TAB_PANELS = ["divergence", "workspace", "graph", "conflicts"];
+
 function switchTab(tab) {
   state.tab = tab;
   for (const button of document.querySelectorAll(".tab")) {
     button.classList.toggle("active", button.dataset.tab === tab);
   }
-  el("tab-divergence").hidden = tab !== "divergence";
-  el("tab-graph").hidden = tab !== "graph";
+  // 逐一比對而不是只處理其中幾個：新增分頁時忘記加進來，
+  // 面板會一直保持隱藏而內容看起來憑空消失。
+  for (const name of TAB_PANELS) {
+    const panel = el(`tab-${name}`);
+    if (panel) panel.hidden = name !== tab;
+  }
   renderDetail();
 }
 
