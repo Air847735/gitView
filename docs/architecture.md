@@ -184,14 +184,17 @@ cargo test --workspace
 - 命令列工具對真實 repository 執行：`passed` —— 見下方實測。
 - 桌面應用程式啟動：`passed` —— 視窗可開啟、程序穩定執行。
 - 前端語法檢查（`node --check`）：`passed`。
-- 操作類指令的介面互動：`not run` —— 受限於下方的繪製問題，按鈕未經人工點擊
-  驗證。其後端邏輯已由 16 項操作整合測試涵蓋。
-- **桌面介面的繪製：`not run`** —— 見下方「介面繪製的診斷結果」。已確認為
-  環境限制，非程式缺陷。需在實體桌面環境確認。
-- 背景 fetch 對真實遠端執行：`not run` —— 本機無 SSH 私鑰，且不應在未經
-  要求下對使用者的 repository 連線。fetch 的錯誤分類已有單元測試涵蓋。
+- 操作類指令的介面互動：`passed` —— 以 X11 XTEST 自動操作完整走過一次，
+  見「介面的自動化操作測試」。
+- 桌面介面的繪製：`passed`，但有條件 —— WebKitGTK 在沒有 RDP 用戶端連線時
+  不會合成畫面。有用戶端連著時正常，截圖與自動操作皆可進行。
+- 對真實遠端執行 fetch 與 push：`passed`（HTTPS）—— 對 GitHub 上的測試
+  repository 實際執行。push 後以 `git ls-remote` 獨立確認遠端 ref 已更新；
+  fetch 後遠端追蹤分支正確前進。
+- SSH 認證路徑：`not run` —— 本機沒有 SSH 私鑰。錯誤分類已有單元測試涵蓋，
+  但實際的 ssh-agent 流程未驗證。
 - 與 Sourcetree 的效能比較：`not run` —— 方法尚未定義。
-- 安裝檔封裝（`cargo tauri build`）：`not run`。
+- 安裝檔封裝（`cargo tauri build --bundles deb`）：`passed`，產出 5.3MB 的 .deb。
 
 不得把未實際執行的檢查記為通過。
 
@@ -493,11 +496,10 @@ repository，需要額外的機制（例如只佈局可見範圍、或將側分�
 
 ## Known Gaps
 
-- 逐區塊挑選衝突內容尚未提供，目前以編輯合併結果代替。 開發環境無法繪製 WebKitGTK 內容，
-
+- 逐區塊挑選衝突內容尚未提供，目前以編輯合併結果代替。
 - 分支的刪除、重新命名與設定追蹤分支尚未實作。
 - 互動式 rebase（調整順序、squash 等）尚未實作。
-- 背景 fetch 未對真實遠端驗證（本機無 SSH 私鑰）。
+- SSH 認證路徑未驗證（本機無 SSH 私鑰）；HTTPS 路徑已驗證。
 - Windows 建置途徑未確認，需實體 Windows 環境或 CI。
 - 與 Sourcetree 的效能比較方法未定義。
 - 大型 repository 的線道數問題（見實測結果），目標規模不受影響。
