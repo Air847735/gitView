@@ -45,6 +45,9 @@ const state = {
   selectedLines: new Set(),
   commitDetail: null,
   lastOpResult: null,
+  searchText: "",
+  searchContent: false,
+  searchHits: [],
 };
 
 const el = (id) => document.getElementById(id);
@@ -507,10 +510,15 @@ async function renderDetail() {
       divergencePanel.appendChild(box);
     }
   } else if (state.tab === "workspace") {
+    // 檔案可能在應用程式之外被改動，切到這個分頁時一併重讀工作區狀態，
+    // 否則變更清單會與差異對不上。
+    await loadWorkspace();
     if (state.diffSource !== "commit") await loadDiff();
     renderWorkspace();
   } else if (state.tab === "conflicts") {
     renderConflicts();
+  } else if (state.tab === "search") {
+    renderSearch();
   } else {
     try {
       renderGraph(await invoke("repo_graph", { path: repo.path, limit: 500 }));
@@ -562,7 +570,7 @@ async function selectRepo(path) {
 }
 
 /** 所有分頁面板的識別碼，順序與工具列上的按鈕一致。 */
-const TAB_PANELS = ["divergence", "workspace", "graph", "conflicts"];
+const TAB_PANELS = ["divergence", "workspace", "graph", "conflicts", "search"];
 
 function switchTab(tab) {
   state.tab = tab;
@@ -907,12 +915,66 @@ function renderWorkspace() {
   );
   const newName = document.createElement("input");
   newName.placeholder = "新分支名稱";
+  const current = data.branches.find((item) => item.is_head);
   bar.append("分支", select, newName,
     button("建立並切換", () => {
       if (!newName.value.trim()) return setStatus("請先輸入分支名稱");
       return runOp("op_create_branch", { path, name: newName.value.trim() });
     }));
   panel.appendChild(bar);
+
+  const branchBar = document.createElement("div");
+  branchBar.className = "workspace-bar";
+  const targetSelect = document.createElement("select");
+  for (const branch of data.branches.filter((item) => !item.is_remote)) {
+    const option = document.createElement("option");
+    option.value = branch.name;
+    option.textContent = branch.name + (branch.is_head ? "（目前）" : "");
+    targetSelect.appendChild(option);
+  }
+  const renameTo = document.createElement("input");
+  renameTo.placeholder = "改成新名稱";
+  branchBar.append(
+    "管理", targetSelect, renameTo,
+    button("改名", () => {
+      if (!renameTo.value.trim()) return setStatus("請先輸入新名稱");
+      return runOp("op_rename_branch", {
+        path, from: targetSelect.value, to: renameTo.value.trim(),
+      });
+    }),
+    button("刪除", () =>
+      runOp("op_delete_branch", { path, name: targetSelect.value }, {
+        title: `刪除分支 ${targetSelect.value}`,
+        detail: "若這條分支上有尚未合併的 commit，刪除後會從分支清單消失；"
+          + "程式會建立還原點，仍可取回。",
+      }), "ghost danger")
+  );
+  panel.appendChild(branchBar);
+
+  const upstreamBar = document.createElement("div");
+  upstreamBar.className = "workspace-bar";
+  const upstreamSelect = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "（不追蹤）";
+  upstreamSelect.appendChild(none);
+  for (const branch of data.branches.filter((item) => item.is_remote)) {
+    const option = document.createElement("option");
+    option.value = branch.name;
+    option.textContent = branch.name;
+    option.selected = current && current.upstream === branch.name;
+    upstreamSelect.appendChild(option);
+  }
+  upstreamBar.append(
+    `${current ? current.name : "目前分支"} 追蹤`, upstreamSelect,
+    button("設定", () =>
+      runOp("op_set_upstream", {
+        path,
+        name: current ? current.name : "",
+        upstream: upstreamSelect.value || null,
+      }))
+  );
+  panel.appendChild(upstreamBar);
 
   // 變更清單
   panel.appendChild(heading(`工作目錄的變更（${data.changes.length}）`));
@@ -1392,7 +1454,8 @@ function renderDiffPanel() {
     }
   );
   const historyButton = button("這個檔案的歷史", () => showFileHistory(file.path));
-  bar.append(title, counts, modeButton, historyButton);
+  const blameButton = button("逐行來源", () => showBlame(file.path));
+  bar.append(title, counts, modeButton, historyButton, blameButton);
   holder.appendChild(bar);
 
   if (state.selectedLines.size > 0) {
@@ -1569,4 +1632,130 @@ function reportProbe() {
     });
   }
   invoke("ui_probe", { items: JSON.stringify(items) }).catch(() => {});
+}
+
+/* ---------- 搜尋 ---------- */
+
+function renderSearch() {
+  const panel = el("tab-search");
+  panel.replaceChildren();
+  const repo = currentRepo();
+  if (!repo) return;
+
+  const bar = document.createElement("div");
+  bar.className = "search-bar";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "搜尋提交訊息、作者或檔案路徑";
+  input.value = state.searchText || "";
+
+  const contentLabel = document.createElement("label");
+  const contentBox = document.createElement("input");
+  contentBox.type = "checkbox";
+  contentBox.checked = Boolean(state.searchContent);
+  contentLabel.append(contentBox, "一併搜尋變更的內容（較慢）");
+
+  const run = async () => {
+    state.searchText = input.value;
+    state.searchContent = contentBox.checked;
+    if (!input.value.trim()) return;
+    setStatus("搜尋中…");
+    try {
+      state.searchHits = await invoke("repo_search", {
+        path: repo.path,
+        needle: input.value,
+        includeContent: contentBox.checked,
+      });
+      setStatus(`找到 ${state.searchHits.length} 筆`);
+    } catch (error) {
+      setStatus(String(error));
+      state.searchHits = [];
+    }
+    renderSearch();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") run();
+  });
+  bar.append(input, contentLabel, button("搜尋", run, "primary"));
+  panel.appendChild(bar);
+
+  const hits = state.searchHits || [];
+  if (hits.length === 0) {
+    const note = document.createElement("p");
+    note.className = "action-note";
+    note.textContent = state.searchText
+      ? "沒有找到符合的 commit。"
+      : "輸入關鍵字後按 Enter。內容搜尋找的是「引入或移除這段文字」的 commit。";
+    panel.appendChild(note);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "hit-list";
+  const labels = { message: "訊息", author: "作者", path: "路徑", content: "內容" };
+  for (const hit of hits) {
+    const row = document.createElement("div");
+    row.className = "hit";
+    const oid = document.createElement("span");
+    oid.className = "oid";
+    oid.textContent = hit.short_oid;
+    const summary = document.createElement("span");
+    summary.className = "summary";
+    summary.textContent = hit.summary;
+    row.append(oid, summary);
+    for (const where of hit.matched) {
+      const tag = document.createElement("span");
+      tag.className = "where";
+      tag.textContent = labels[where] || where;
+      row.appendChild(tag);
+    }
+    row.appendChild(button("看變更", () => showCommitDetail(hit.oid)));
+    list.appendChild(row);
+  }
+  panel.appendChild(list);
+}
+
+/* ---------- Blame ---------- */
+
+async function showBlame(file) {
+  const repo = currentRepo();
+  if (!repo) return;
+  setStatus("計算 blame…");
+  try {
+    const lines = await invoke("repo_blame", { path: repo.path, file });
+    setStatus(`${file}：${lines.length} 行`);
+    const holder = el("diff-panel");
+    holder.replaceChildren();
+
+    const bar = document.createElement("div");
+    bar.className = "action-bar";
+    bar.append(button("← 回到差異", () => renderDiffPanel()));
+    const title = document.createElement("span");
+    title.className = "diff-title";
+    title.textContent = `${file} 的逐行來源`;
+    bar.appendChild(title);
+    holder.appendChild(bar);
+
+    const box = document.createElement("div");
+    box.className = "blame";
+    for (const line of lines) {
+      const row = document.createElement("div");
+      row.className = "blame-row" + (line.same_as_previous ? " same" : "");
+      const who = document.createElement("span");
+      who.className = "who";
+      who.textContent = `${line.short_oid} ${line.author}`;
+      who.title = line.summary;
+      const no = document.createElement("span");
+      no.className = "lineno";
+      no.textContent = line.line_number;
+      const code = document.createElement("span");
+      code.className = "code";
+      code.textContent = line.content;
+      row.append(who, no, code);
+      box.appendChild(row);
+    }
+    holder.appendChild(box);
+  } catch (error) {
+    setStatus(String(error));
+  }
 }

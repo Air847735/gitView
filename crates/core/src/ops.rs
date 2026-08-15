@@ -84,6 +84,13 @@ fn head_commit_oid(repo: &Repository) -> Result<Oid> {
 /// 在執行任何改動之前建立還原點。
 pub fn create_safety_point(repo: &Repository, operation: &str) -> Result<SafetyPoint> {
     let oid = head_commit_oid(repo)?;
+    create_safety_point_at(repo, operation, oid)
+}
+
+/// 建立指向特定 commit 的還原點。
+///
+/// 刪除分支時要記的是那條分支的位置，而不是 HEAD。
+pub fn create_safety_point_at(repo: &Repository, operation: &str, oid: Oid) -> Result<SafetyPoint> {
     let created = now_unix();
     let reference = format!("{UNDO_NAMESPACE}/{created}-{operation}");
     repo.reference(

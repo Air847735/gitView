@@ -595,6 +595,91 @@ pub fn unstage_selection(repo: &Repository, path: &str, selected: &[LineRef]) ->
     })
 }
 
+/// 刪除本機分支。
+///
+/// 刪除之後該分支上的 commit 可能變成不可達，因此一律先建立還原點。
+/// 不允許刪除目前所在的分支。
+pub fn delete_branch(repo: &Repository, name: &str) -> Result<OpOutcome> {
+    let mut branch = repo
+        .find_branch(name, git2::BranchType::Local)
+        .with_context(|| format!("找不到本機分支 {name}"))?;
+    if branch.is_head() {
+        bail!("不能刪除目前所在的分支，請先切換到別的分支");
+    }
+    let tip = branch.get().target().context("分支沒有指向任何 commit")?;
+
+    // 還原點指向分支原本的位置，而不是 HEAD。
+    let point = crate::ops::create_safety_point_at(repo, "delete-branch", tip)?;
+
+    // 未合併的分支刪掉會失去工作成果，訊息要說清楚。
+    let merged = repo
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .and_then(|head_oid| repo.graph_descendant_of(head_oid, tip).ok())
+        .unwrap_or(false);
+
+    branch
+        .delete()
+        .with_context(|| format!("無法刪除分支 {name}"))?;
+
+    Ok(OpOutcome {
+        message: if merged {
+            format!("已刪除分支 {name}（內容已包含在目前分支中）")
+        } else {
+            format!(
+                "已刪除分支 {name}。它有尚未合併的內容，可用還原點取回 {}",
+                &tip.to_string()[..8]
+            )
+        },
+        undo: Some(point),
+    })
+}
+
+/// 重新命名本機分支。
+pub fn rename_branch(repo: &Repository, from: &str, to: &str) -> Result<OpOutcome> {
+    if to.trim().is_empty() {
+        bail!("新的分支名稱不能是空的");
+    }
+    let mut branch = repo
+        .find_branch(from, git2::BranchType::Local)
+        .with_context(|| format!("找不到本機分支 {from}"))?;
+    branch
+        .rename(to, false)
+        .with_context(|| format!("無法改名為 {to}（可能已存在同名分支）"))?;
+
+    Ok(OpOutcome {
+        message: format!("已將 {from} 改名為 {to}"),
+        undo: None,
+    })
+}
+
+/// 設定分支要追蹤的遠端分支。
+///
+/// `upstream` 傳 `None` 表示取消追蹤。
+pub fn set_upstream(repo: &Repository, name: &str, upstream: Option<&str>) -> Result<OpOutcome> {
+    let mut branch = repo
+        .find_branch(name, git2::BranchType::Local)
+        .with_context(|| format!("找不到本機分支 {name}"))?;
+
+    // 先確認目標存在，否則會設定出一個永遠對不上的追蹤對象。
+    if let Some(target) = upstream {
+        repo.find_branch(target, git2::BranchType::Remote)
+            .with_context(|| format!("找不到遠端分支 {target}"))?;
+    }
+    branch
+        .set_upstream(upstream)
+        .with_context(|| format!("無法設定 {name} 的追蹤對象"))?;
+
+    Ok(OpOutcome {
+        message: match upstream {
+            Some(target) => format!("{name} 現在追蹤 {target}"),
+            None => format!("已取消 {name} 的追蹤對象"),
+        },
+        undo: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

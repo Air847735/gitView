@@ -12,12 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
 use gitview_core::{
-    conflict, diff, divergence, fetch, lay_out, ops, repo as core_repo, status, workspace,
+    conflict, diff, divergence, fetch, lay_out, ops, repo as core_repo, search, status, workspace,
 };
 
 use crate::dto::{
-    BranchDto, CommitDetailDto, ConflictFileDto, DivergenceDto, FetchStateDto, FileChangeDto,
-    FileDiffDto, GraphDto, OpOutcomeDto, RepoStatusDto, SafetyPointDto, StashDto, WorkspaceDto,
+    BlameLineDto, BranchDto, CommitDetailDto, ConflictFileDto, DivergenceDto, FetchStateDto,
+    FileChangeDto, FileDiffDto, GraphDto, OpOutcomeDto, RepoStatusDto, SafetyPointDto,
+    SearchHitDto, StashDto, WorkspaceDto,
 };
 use crate::settings::{self, Settings};
 
@@ -472,6 +473,49 @@ pub fn unstage_selection(
     let refs = to_line_refs(selection);
     run_op(path, move |repo| {
         workspace::unstage_selection(repo, &file, &refs)
+    })
+}
+
+/// 搜尋歷史。內容比對成本高，因此由呼叫端明確開啟。
+pub fn search_in(
+    path: &str,
+    needle: String,
+    include_content: bool,
+) -> Result<Vec<SearchHitDto>, String> {
+    let repository = open(path)?;
+    let scope = search::SearchScope {
+        content: include_content,
+        ..search::SearchScope::default()
+    };
+    // 掃描上限避免在大型 repository 上無限期執行；目標規模遠低於此。
+    search::search(&repository, &needle, scope, 100, 5_000)
+        .map_err(|error| format!("{error:#}"))
+        .map(|hits| hits.iter().map(SearchHitDto::from).collect())
+}
+
+/// 逐行標出檔案每一行的來源。
+pub fn blame_of(path: &str, file: &str) -> Result<Vec<BlameLineDto>, String> {
+    let repository = open(path)?;
+    search::blame(&repository, file, 5_000)
+        .map_err(|error| format!("{error:#}"))
+        .map(|lines| lines.iter().map(BlameLineDto::from).collect())
+}
+
+pub fn delete_branch(path: &str, name: String) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::delete_branch(repo, &name))
+}
+
+pub fn rename_branch(path: &str, from: String, to: String) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| workspace::rename_branch(repo, &from, &to))
+}
+
+pub fn set_upstream(
+    path: &str,
+    name: String,
+    upstream: Option<String>,
+) -> Result<OpOutcomeDto, String> {
+    run_op(path, move |repo| {
+        workspace::set_upstream(repo, &name, upstream.as_deref())
     })
 }
 

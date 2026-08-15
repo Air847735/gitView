@@ -19,6 +19,8 @@ pub mod ops;
 #[cfg(feature = "git")]
 pub mod repo;
 #[cfg(feature = "git")]
+pub mod search;
+#[cfg(feature = "git")]
 pub mod status;
 #[cfg(feature = "git")]
 pub mod workspace;
@@ -38,6 +40,8 @@ pub use fetch::{default_remote, fetch, FetchFailure, FetchReport};
 pub use ops::{OpOutcome, SafetyPoint};
 #[cfg(feature = "git")]
 pub use repo::{load_graph, ref_labels, summarize, RepoSummary};
+#[cfg(feature = "git")]
+pub use search::{blame, search, BlameLine, SearchHit, SearchScope};
 #[cfg(feature = "git")]
 pub use status::{status, Attention, RepoStatus, WorkingTree};
 #[cfg(feature = "git")]

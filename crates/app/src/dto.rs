@@ -582,3 +582,55 @@ pub struct CommitDetailDto {
     pub parents: Vec<String>,
     pub files: Vec<FileDiffDto>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchHitDto {
+    pub oid: String,
+    pub short_oid: String,
+    pub summary: String,
+    pub author: String,
+    pub timestamp: i64,
+    pub matched: Vec<String>,
+    pub paths: Vec<String>,
+}
+
+impl From<&gitview_core::search::SearchHit> for SearchHitDto {
+    fn from(hit: &gitview_core::search::SearchHit) -> Self {
+        Self {
+            oid: hit.oid.clone(),
+            short_oid: hit.short_oid.clone(),
+            summary: hit.summary.clone(),
+            author: hit.author.clone(),
+            timestamp: hit.timestamp,
+            matched: hit.matched.iter().map(|m| (*m).to_owned()).collect(),
+            paths: hit.paths.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BlameLineDto {
+    pub line_number: usize,
+    pub content: String,
+    pub oid: String,
+    pub short_oid: String,
+    pub author: String,
+    pub summary: String,
+    pub timestamp: i64,
+    pub same_as_previous: bool,
+}
+
+impl From<&gitview_core::search::BlameLine> for BlameLineDto {
+    fn from(line: &gitview_core::search::BlameLine) -> Self {
+        Self {
+            line_number: line.line_number,
+            content: line.content.clone(),
+            oid: line.oid.clone(),
+            short_oid: line.short_oid.clone(),
+            author: line.author.clone(),
+            summary: line.summary.clone(),
+            timestamp: line.timestamp,
+            same_as_previous: line.same_as_previous,
+        }
+    }
+}

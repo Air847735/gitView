@@ -28,6 +28,7 @@
   推送、中止），以及還原點的建立、列出、還原與清理。
 - `crates/core/src/workspace.rs`：暫存、提交、分支、stash、丟棄。
 - `crates/core/src/conflict.rs`：衝突的檢視與解決，以及解決後的繼續與略過。
+- `crates/core/src/search.rs`：搜尋 commit 與 blame。
 - `crates/core/src/diff.rs`：結構化差異、行內字元標示、空白變更判定、
   以及與即將進來的遠端變更的撞擊偵測。
 - `crates/app/src/service.rs`：應用程式狀態與各項操作，指令與背景排程共用。
@@ -497,7 +498,6 @@ repository，需要額外的機制（例如只佈局可見範圍、或將側分�
 ## Known Gaps
 
 - 逐區塊挑選衝突內容尚未提供，目前以編輯合併結果代替。
-- 分支的刪除、重新命名與設定追蹤分支尚未實作。
 - 互動式 rebase（調整順序、squash 等）尚未實作。
 - SSH 認證路徑未驗證（本機無 SSH 私鑰）；HTTPS 路徑已驗證。
 - Windows 建置途徑未確認，需實體 Windows 環境或 CI。

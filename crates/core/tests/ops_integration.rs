@@ -736,3 +736,153 @@ fn during_rebase_ours_is_the_upstream_side() {
         "rebase 時 theirs 應為本機的內容"
     );
 }
+
+#[test]
+fn branch_can_be_renamed_and_deleted_with_recovery() {
+    let playground = Playground::new("branch-ops");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\n", "first");
+    let main = repo.head().unwrap().shorthand().unwrap().to_owned();
+
+    workspace::create_branch(&repo, "feature/old").expect("建立失敗");
+    write_commit(&repo, "b.txt", "work\n", "分支上的工作");
+    let tip = repo.head().unwrap().target().unwrap();
+    workspace::checkout_branch(&repo, &main).expect("切換失敗");
+
+    // 改名
+    workspace::rename_branch(&repo, "feature/old", "feature/new").expect("改名失敗");
+    let names: Vec<String> = workspace::branches(&repo)
+        .unwrap()
+        .into_iter()
+        .map(|b| b.name)
+        .collect();
+    assert!(names.contains(&"feature/new".to_owned()));
+    assert!(!names.contains(&"feature/old".to_owned()));
+
+    // 刪除：未合併，訊息要說明可還原
+    let outcome = workspace::delete_branch(&repo, "feature/new").expect("刪除失敗");
+    assert!(outcome.message.contains("尚未合併"), "訊息應提醒內容未合併");
+    let point = outcome.undo.expect("刪除分支必須留下還原點");
+    assert_eq!(point.oid, tip.to_string(), "還原點應指向分支原本的位置");
+
+    // 還原點讓 commit 仍可取回
+    assert!(repo.find_commit(tip).is_ok(), "還原點在，commit 就不會消失");
+}
+
+#[test]
+fn the_current_branch_cannot_be_deleted() {
+    let playground = Playground::new("branch-guard");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "one\n", "first");
+    let current = repo.head().unwrap().shorthand().unwrap().to_owned();
+
+    let error = workspace::delete_branch(&repo, &current).expect_err("不應允許");
+    assert!(format!("{error}").contains("目前所在的分支"));
+}
+
+#[test]
+fn upstream_can_be_set_and_cleared() {
+    let playground = Playground::new("upstream");
+    let repo = scenario(&playground, "remote.txt", "remote\n", None);
+    let branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+
+    workspace::set_upstream(&repo, &branch, None).expect("取消追蹤失敗");
+    assert!(
+        repo.find_branch(&branch, git2::BranchType::Local)
+            .unwrap()
+            .upstream()
+            .is_err(),
+        "取消後不應有追蹤對象"
+    );
+
+    let remote_branch = format!("origin/{branch}");
+    workspace::set_upstream(&repo, &branch, Some(&remote_branch)).expect("設定追蹤失敗");
+    assert!(repo
+        .find_branch(&branch, git2::BranchType::Local)
+        .unwrap()
+        .upstream()
+        .is_ok());
+}
+
+#[test]
+fn setting_a_nonexistent_upstream_is_rejected() {
+    let playground = Playground::new("upstream-guard");
+    let repo = scenario(&playground, "remote.txt", "remote\n", None);
+    let branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+
+    let error = workspace::set_upstream(&repo, &branch, Some("origin/nope"))
+        .expect_err("不存在的遠端分支應被拒絕");
+    assert!(format!("{error}").contains("找不到遠端分支"));
+}
+
+#[test]
+fn search_finds_commits_by_message_author_and_path() {
+    use gitview_core::search::{self, SearchScope};
+
+    let playground = Playground::new("search");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "alpha.txt", "one\n", "加入 alpha 功能");
+    write_commit(&repo, "beta.txt", "two\n", "修正 beta 的問題");
+
+    let by_message = search::search(&repo, "alpha", SearchScope::default(), 20, 100).unwrap();
+    assert_eq!(by_message.len(), 1);
+    assert!(by_message[0].matched.contains(&"message"));
+
+    // 路徑命中：搜尋 beta 應同時命中訊息與檔名。
+    let by_path = search::search(&repo, "beta.txt", SearchScope::default(), 20, 100).unwrap();
+    assert_eq!(by_path.len(), 1);
+    assert!(by_path[0].matched.contains(&"path"));
+
+    let by_author = search::search(&repo, "Test", SearchScope::default(), 20, 100).unwrap();
+    assert_eq!(by_author.len(), 2, "兩個 commit 的作者都是 Test");
+}
+
+#[test]
+fn content_search_finds_the_commit_that_introduced_the_text() {
+    use gitview_core::search::{self, SearchScope};
+
+    let playground = Playground::new("pickaxe");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "hello\n", "第一版");
+    write_commit(&repo, "a.txt", "hello\nMAGIC_TOKEN\n", "引入標記");
+    write_commit(&repo, "a.txt", "hello\nMAGIC_TOKEN\nmore\n", "無關的變更");
+
+    let scope = SearchScope {
+        message: false,
+        author: false,
+        path: false,
+        content: true,
+    };
+    let hits = search::search(&repo, "MAGIC_TOKEN", scope, 20, 100).unwrap();
+    assert_eq!(
+        hits.len(),
+        1,
+        "只有引入該文字的 commit 應命中，而非每個含有它的"
+    );
+    assert_eq!(hits[0].summary, "引入標記");
+}
+
+#[test]
+fn blame_attributes_each_line_to_its_last_change() {
+    use gitview_core::search;
+
+    let playground = Playground::new("blame");
+    let path = playground.path("solo");
+    let repo = Repository::init(&path).expect("無法初始化");
+    write_commit(&repo, "a.txt", "line one\nline two\n", "建立檔案");
+    let first = repo.head().unwrap().target().unwrap();
+    write_commit(&repo, "a.txt", "line one\nCHANGED\n", "改第二行");
+    let second = repo.head().unwrap().target().unwrap();
+
+    let lines = search::blame(&repo, "a.txt", 100).expect("blame 失敗");
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].content, "line one");
+    assert_eq!(lines[0].oid, first.to_string(), "第一行仍屬於原本的 commit");
+    assert_eq!(lines[1].content, "CHANGED");
+    assert_eq!(lines[1].oid, second.to_string(), "第二行屬於後來的 commit");
+    assert!(!lines[1].same_as_previous, "兩行來自不同 commit");
+}

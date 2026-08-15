@@ -230,3 +230,36 @@ pub fn ui_probe(items: String) {
     let path = std::env::temp_dir().join("gitview-ui-probe.json");
     let _ = std::fs::write(path, items);
 }
+
+#[tauri::command]
+pub fn repo_search(
+    path: String,
+    needle: String,
+    include_content: Option<bool>,
+) -> Result<Vec<crate::dto::SearchHitDto>, String> {
+    service::search_in(&path, needle, include_content.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn repo_blame(path: String, file: String) -> Result<Vec<crate::dto::BlameLineDto>, String> {
+    service::blame_of(&path, &file)
+}
+
+#[tauri::command]
+pub fn op_delete_branch(path: String, name: String) -> Result<OpOutcomeDto, String> {
+    service::delete_branch(&path, name)
+}
+
+#[tauri::command]
+pub fn op_rename_branch(path: String, from: String, to: String) -> Result<OpOutcomeDto, String> {
+    service::rename_branch(&path, from, to)
+}
+
+#[tauri::command]
+pub fn op_set_upstream(
+    path: String,
+    name: String,
+    upstream: Option<String>,
+) -> Result<OpOutcomeDto, String> {
+    service::set_upstream(&path, name, upstream)
+}
