@@ -10,11 +10,11 @@
   <header class="toolbar">
     <div class="brand">gitview</div>
     <div class="toolbar-actions">
-      <button id="add-repo" type="button">加入 repository</button>
-      <button id="fetch-all" type="button">立即檢查全部</button>
-      <button id="toggle-settings" type="button" class="ghost">設定</button>
+      <button id="add-repo" type="button" class="primary">加入 repository</button>
+      <button id="fetch-all" type="button">檢查全部</button>
     </div>
     <div id="global-status" class="global-status" role="status" aria-live="polite"></div>
+    <button id="toggle-settings" type="button" class="ghost">設定</button>
   </header>
 
   <section id="settings-panel" class="settings-panel" hidden>
@@ -42,55 +42,58 @@
   </section>
 
   <main class="layout">
-    <aside class="repo-list" aria-label="Repository 清單">
-      <div id="repos"></div>
+    <aside class="sidebar" aria-label="Repository 清單">
+      <div class="sidebar-head">
+        <span>Repository</span>
+        <span id="repo-count" class="count"></span>
+      </div>
+      <div id="repos" class="repo-list"></div>
       <p id="empty-hint" class="empty-hint">
         還沒有加入任何 repository。<br />按上方的「加入 repository」開始。
       </p>
     </aside>
 
-    <section class="detail">
+    <section class="workspace">
       <div id="detail-empty" class="detail-empty">選擇左側的 repository 檢視細節</div>
 
-      <div id="detail-body" hidden>
-        <div class="detail-header">
-          <div>
+      <div id="detail-body" class="detail-body" hidden>
+        <header class="repo-head">
+          <div class="repo-identity">
             <h1 id="detail-name"></h1>
             <div id="detail-path" class="path"></div>
           </div>
-          <div class="detail-actions">
+          <div id="detail-chips" class="chips"></div>
+          <div class="repo-actions">
             <button id="fetch-one" type="button">檢查更新</button>
             <button id="remove-repo" type="button" class="ghost danger">移除</button>
           </div>
-        </div>
-
-        <div id="detail-chips" class="chips"></div>
+        </header>
 
         <div id="op-result" class="op-result" hidden></div>
-
         <div id="conflict-banner" class="conflict-banner" hidden></div>
 
         <nav class="tabs" role="tablist">
           <button class="tab active" data-tab="divergence" role="tab" type="button">同步狀態</button>
           <button class="tab" data-tab="workspace" role="tab" type="button">變更</button>
+          <button class="tab" data-tab="branches" role="tab" type="button">分支</button>
           <button class="tab" data-tab="graph" role="tab" type="button">歷史圖</button>
           <button class="tab" data-tab="search" role="tab" type="button">搜尋</button>
           <button class="tab" data-tab="conflicts" role="tab" type="button" hidden>解決衝突</button>
         </nav>
 
-        <div id="tab-divergence" class="tab-panel" role="tabpanel"></div>
+        <div class="tab-body">
+          <div id="tab-divergence" class="tab-panel scrollable" role="tabpanel"></div>
+          <div id="tab-workspace" class="tab-panel" role="tabpanel" hidden></div>
+          <div id="tab-branches" class="tab-panel scrollable" role="tabpanel" hidden></div>
+          <div id="tab-conflicts" class="tab-panel scrollable" role="tabpanel" hidden></div>
+          <div id="tab-search" class="tab-panel scrollable" role="tabpanel" hidden></div>
 
-        <div id="tab-workspace" class="tab-panel" role="tabpanel" hidden></div>
-
-        <div id="tab-conflicts" class="tab-panel" role="tabpanel" hidden></div>
-
-        <div id="tab-search" class="tab-panel" role="tabpanel" hidden></div>
-
-        <div id="tab-graph" class="tab-panel" role="tabpanel" hidden>
-          <div id="graph-meta" class="graph-meta"></div>
-          <div id="graph-view" class="graph-view">
-            <canvas id="graph-canvas"></canvas>
-            <div id="graph-rows"></div>
+          <div id="tab-graph" class="tab-panel" role="tabpanel" hidden>
+            <div id="graph-meta" class="graph-meta"></div>
+            <div id="graph-view" class="graph-view">
+              <canvas id="graph-canvas"></canvas>
+              <div id="graph-rows"></div>
+            </div>
           </div>
         </div>
       </div>

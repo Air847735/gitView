@@ -48,6 +48,7 @@ const state = {
   searchText: "",
   searchContent: false,
   searchHits: [],
+  commitMessage: "",
 };
 
 const el = (id) => document.getElementById(id);
@@ -120,6 +121,8 @@ function renderRepoList() {
   const container = el("repos");
   container.replaceChildren();
   el("empty-hint").hidden = state.repos.length > 0;
+  const count = el("repo-count");
+  if (count) count.textContent = state.repos.length || "";
 
   for (const repo of state.repos) {
     const card = document.createElement("button");
@@ -517,6 +520,8 @@ async function renderDetail() {
     renderWorkspace();
   } else if (state.tab === "conflicts") {
     renderConflicts();
+  } else if (state.tab === "branches") {
+    renderBranches();
   } else if (state.tab === "search") {
     renderSearch();
   } else {
@@ -570,7 +575,7 @@ async function selectRepo(path) {
 }
 
 /** 所有分頁面板的識別碼，順序與工具列上的按鈕一致。 */
-const TAB_PANELS = ["divergence", "workspace", "graph", "conflicts", "search"];
+const TAB_PANELS = ["divergence", "workspace", "branches", "graph", "conflicts", "search"];
 
 function switchTab(tab) {
   state.tab = tab;
@@ -899,242 +904,86 @@ function renderWorkspace() {
   }
   const path = repo.path;
 
-  // 分支列
-  const bar = document.createElement("div");
-  bar.className = "workspace-bar";
-  const select = document.createElement("select");
-  for (const branch of data.branches.filter((item) => !item.is_remote)) {
-    const option = document.createElement("option");
-    option.value = branch.name;
-    option.textContent = branch.name;
-    option.selected = branch.is_head;
-    select.appendChild(option);
-  }
-  select.addEventListener("change", () =>
-    runOp("op_checkout", { path, name: select.value })
-  );
-  const newName = document.createElement("input");
-  newName.placeholder = "新分支名稱";
-  const current = data.branches.find((item) => item.is_head);
-  bar.append("分支", select, newName,
-    button("建立並切換", () => {
-      if (!newName.value.trim()) return setStatus("請先輸入分支名稱");
-      return runOp("op_create_branch", { path, name: newName.value.trim() });
-    }));
-  panel.appendChild(bar);
+  const split = document.createElement("div");
+  split.className = "work-split";
 
-  const branchBar = document.createElement("div");
-  branchBar.className = "workspace-bar";
-  const targetSelect = document.createElement("select");
-  for (const branch of data.branches.filter((item) => !item.is_remote)) {
-    const option = document.createElement("option");
-    option.value = branch.name;
-    option.textContent = branch.name + (branch.is_head ? "（目前）" : "");
-    targetSelect.appendChild(option);
-  }
-  const renameTo = document.createElement("input");
-  renameTo.placeholder = "改成新名稱";
-  branchBar.append(
-    "管理", targetSelect, renameTo,
-    button("改名", () => {
-      if (!renameTo.value.trim()) return setStatus("請先輸入新名稱");
-      return runOp("op_rename_branch", {
-        path, from: targetSelect.value, to: renameTo.value.trim(),
-      });
-    }),
-    button("刪除", () =>
-      runOp("op_delete_branch", { path, name: targetSelect.value }, {
-        title: `刪除分支 ${targetSelect.value}`,
-        detail: "若這條分支上有尚未合併的 commit，刪除後會從分支清單消失；"
-          + "程式會建立還原點，仍可取回。",
-      }), "ghost danger")
-  );
-  panel.appendChild(branchBar);
+  /* 左欄：變更清單、擱置、提交 */
+  const left = document.createElement("div");
+  left.className = "work-left";
 
-  const upstreamBar = document.createElement("div");
-  upstreamBar.className = "workspace-bar";
-  const upstreamSelect = document.createElement("select");
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "（不追蹤）";
-  upstreamSelect.appendChild(none);
-  for (const branch of data.branches.filter((item) => item.is_remote)) {
-    const option = document.createElement("option");
-    option.value = branch.name;
-    option.textContent = branch.name;
-    option.selected = current && current.upstream === branch.name;
-    upstreamSelect.appendChild(option);
-  }
-  upstreamBar.append(
-    `${current ? current.name : "目前分支"} 追蹤`, upstreamSelect,
-    button("設定", () =>
-      runOp("op_set_upstream", {
-        path,
-        name: current ? current.name : "",
-        upstream: upstreamSelect.value || null,
-      }))
+  const head = document.createElement("div");
+  head.className = "pane-head";
+  const heading = document.createElement("span");
+  heading.textContent = `變更 ${data.changes.length}`;
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  head.append(
+    heading, grow,
+    button("全部暫存", () => runOp("op_stage", { path, paths: [] })),
+    button("全部取消", () => runOp("op_unstage", { path, paths: [] }))
   );
-  panel.appendChild(upstreamBar);
+  left.appendChild(head);
 
-  // 變更清單
-  panel.appendChild(heading(`工作目錄的變更（${data.changes.length}）`));
-  const stageNote = document.createElement("p");
-  stageNote.className = "action-note";
-  stageNote.textContent = "「暫存」是把變更加入索引，準備一起提交。";
-  panel.appendChild(stageNote);
+  const list = document.createElement("div");
+  list.className = "pane-scroll";
   if (data.changes.length === 0) {
     const empty = document.createElement("p");
     empty.className = "action-note";
-    empty.textContent = "沒有任何變更。";
-    panel.appendChild(empty);
-  } else {
-    const list = document.createElement("div");
-    list.className = "change-list";
-    for (const change of data.changes) {
-      const row = document.createElement("div");
-      row.className = "change-row";
-
-      const kind = document.createElement("span");
-      const label = change.is_conflicted
-        ? "conflict"
-        : change.staged !== "none"
-          ? change.staged
-          : change.unstaged;
-      kind.className = `kind ${label}`;
-      kind.textContent = { new: "新增", modified: "修改", deleted: "刪除", renamed: "改名", conflict: "衝突" }[label] || label;
-
-      const pathNode = document.createElement("span");
-      pathNode.className = "path";
-      pathNode.textContent = change.path;
-      row.append(kind, pathNode);
-
-      if (!change.is_conflicted) {
-        if (change.staged === "none") {
-          row.appendChild(button("暫存", () => runOp("op_stage", { path, paths: [change.path] })));
-        } else {
-          row.appendChild(button("取消暫存", () => runOp("op_unstage", { path, paths: [change.path] })));
-        }
-        if (!change.is_untracked) {
-          row.appendChild(
-            button("丟棄", () =>
-              runOp("op_discard", { path, paths: [change.path] }, {
-                title: `丟棄 ${change.path} 的變更`,
-                detail: "尚未提交的編輯會永久消失，git 無法還原。",
-              }), "ghost danger")
-          );
-        }
-      }
-      list.appendChild(row);
-    }
-    panel.appendChild(list);
-
-    const bulk = document.createElement("div");
-    bulk.className = "action-bar";
-    bulk.append(
-      button("暫存全部", () => runOp("op_stage", { path, paths: [] })),
-      button("取消暫存全部", () => runOp("op_unstage", { path, paths: [] }))
-    );
-    panel.appendChild(bulk);
+    empty.style.padding = "0.6rem 0.7rem";
+    empty.textContent = "工作目錄是乾淨的。";
+    list.appendChild(empty);
   }
-
-  // 差異
-  panel.appendChild(heading("差異"));
-  const sourceBar = document.createElement("div");
-  sourceBar.className = "action-bar";
-  for (const [value, label] of [["unstaged", "未暫存"], ["staged", "已暫存"]]) {
-    const item = button(label, async () => {
-      state.diffSource = value;
+  for (const change of data.changes) {
+    const row = document.createElement("div");
+    row.className = "change-row" + (change.path === state.selectedFile ? " selected" : "");
+    row.addEventListener("click", () => {
+      state.selectedFile = change.path;
       state.selectedLines.clear();
-      state.commitDetail = null;
-      await loadDiff();
       renderWorkspace();
-    }, state.diffSource === value ? "primary" : undefined);
-    sourceBar.appendChild(item);
-  }
-  if (state.commitDetail) {
-    const info = document.createElement("span");
-    info.className = "action-note";
-    info.style.flexBasis = "auto";
-    info.textContent = `正在看 commit ${state.commitDetail.short_oid}：${state.commitDetail.summary}`;
-    sourceBar.appendChild(info);
-  }
-  panel.appendChild(sourceBar);
-
-  if (state.diffFiles.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "action-note";
-    empty.textContent = state.diffSource === "staged"
-      ? "沒有已加入索引的變更。"
-      : "沒有未暫存的變更。已加入索引的變更請切到「已暫存」檢視。";
-    panel.appendChild(empty);
-  }
-
-  const diffLayout = document.createElement("div");
-  diffLayout.className = "diff-layout";
-  const fileColumn = document.createElement("div");
-  fileColumn.className = "conflict-files";
-  for (const item of state.diffFiles) {
-    const entry = button(`${item.path}  +${item.added} −${item.removed}`, () => {
-      state.selectedFile = item.path;
-      state.selectedLines.clear();
-      renderDiffPanel();
-      for (const node of fileColumn.children) node.classList.remove("selected");
-      entry.classList.add("selected");
     });
-    if (item.path === state.selectedFile) entry.classList.add("selected");
-    fileColumn.appendChild(entry);
+
+    const label = change.is_conflicted
+      ? "conflict"
+      : change.staged !== "none" ? change.staged : change.unstaged;
+    const kind = document.createElement("span");
+    kind.className = `kind ${label}`;
+    kind.textContent =
+      { new: "新增", modified: "修改", deleted: "刪除", renamed: "改名", conflict: "衝突" }[label] || label;
+
+    const name = document.createElement("span");
+    name.className = "path";
+    name.textContent = change.path;
+    row.append(kind, name);
+
+    if (!change.is_conflicted) {
+      const staged = change.staged !== "none";
+      row.appendChild(button(staged ? "取消" : "暫存", (event) => {
+        event.stopPropagation();
+        return runOp(staged ? "op_unstage" : "op_stage", { path, paths: [change.path] });
+      }));
+      if (!change.is_untracked) {
+        row.appendChild(button("丟棄", (event) => {
+          event.stopPropagation();
+          return runOp("op_discard", { path, paths: [change.path] }, {
+            title: `丟棄 ${change.path} 的變更`,
+            detail: "尚未提交的編輯會永久消失，git 無法還原。",
+          });
+        }, "ghost danger"));
+      }
+    }
+    list.appendChild(row);
   }
-  const diffHolder = document.createElement("div");
-  diffHolder.id = "diff-panel";
-  diffLayout.append(fileColumn, diffHolder);
-  panel.appendChild(diffLayout);
-  renderDiffPanel();
+  left.appendChild(list);
 
-  // 提交
-  panel.appendChild(heading("提交"));
-  const box = document.createElement("div");
-  box.className = "commit-box";
-  const message = document.createElement("textarea");
-  message.placeholder = "這次改了什麼？";
-  const actions = document.createElement("div");
-  actions.className = "commit-actions";
-  const amendLabel = document.createElement("label");
-  const amend = document.createElement("input");
-  amend.type = "checkbox";
-  amendLabel.append(amend, "改寫前一個 commit");
-  actions.append(
-    button("提交", async () => {
-      const outcome = await runOp("op_commit", {
-        path,
-        message: message.value,
-        amend: amend.checked,
-      }, amend.checked ? {
-        title: "改寫前一個 commit",
-        detail: "識別碼會改變。如果它已經推送出去，其他人會看到歷史不一致。",
-      } : undefined);
-      if (outcome) message.value = "";
-    }, "primary"),
-    amendLabel
-  );
-  box.append(message, actions);
-  panel.appendChild(box);
-
-  // Stash
-  panel.appendChild(heading(`擱置的變更（${data.stashes.length}）`));
-  const stashNote = document.createElement("p");
-  stashNote.className = "action-note";
-  stashNote.textContent =
-    "「擱置」是把變更整批收起來、讓工作目錄回到乾淨狀態，之後可以再取回。" +
-    "整合遠端內容之前若不想先提交，就用這個。";
-  panel.appendChild(stashNote);
-
-  const stashBar = document.createElement("div");
-  stashBar.className = "action-bar";
-  stashBar.appendChild(button("把目前的變更擱置起來", () => runOp("op_stash_save", { path, message: "" })));
-  panel.appendChild(stashBar);
   if (data.stashes.length > 0) {
-    const list = document.createElement("div");
-    list.className = "change-list";
+    const stashHead = document.createElement("div");
+    stashHead.className = "pane-head";
+    stashHead.textContent = `擱置的變更 ${data.stashes.length}`;
+    left.appendChild(stashHead);
+    const stashList = document.createElement("div");
+    stashList.className = "change-list";
+    stashList.style.border = "0";
+    stashList.style.borderRadius = "0";
     for (const stash of data.stashes) {
       const row = document.createElement("div");
       row.className = "change-row";
@@ -1143,15 +992,185 @@ function renderWorkspace() {
       text.textContent = stash.message;
       row.append(text,
         button("取回", () => runOp("op_stash_pop", { path, index: stash.index })),
-        button("刪除", () =>
-          runOp("op_stash_drop", { path, index: stash.index }, {
-            title: "刪除這筆擱置",
-            detail: "裡面的內容會永久消失。",
-          }), "ghost danger"));
-      list.appendChild(row);
+        button("刪除", () => runOp("op_stash_drop", { path, index: stash.index }, {
+          title: "刪除這筆擱置",
+          detail: "裡面的內容會永久消失。",
+        }), "ghost danger"));
+      stashList.appendChild(row);
     }
-    panel.appendChild(list);
+    left.appendChild(stashList);
   }
+
+  const box = document.createElement("div");
+  box.className = "commit-box";
+  const message = document.createElement("textarea");
+  message.placeholder = "這次改了什麼？";
+  message.value = state.commitMessage || "";
+  message.addEventListener("input", () => { state.commitMessage = message.value; });
+  const actions = document.createElement("div");
+  actions.className = "commit-actions";
+  const amendLabel = document.createElement("label");
+  const amend = document.createElement("input");
+  amend.type = "checkbox";
+  amendLabel.append(amend, "改寫前一個 commit");
+  actions.append(
+    button("提交", async () => {
+      const done = await runOp("op_commit", {
+        path, message: message.value, amend: amend.checked,
+      }, amend.checked ? {
+        title: "改寫前一個 commit",
+        detail: "識別碼會改變。如果它已經推送出去，其他人會看到歷史不一致。",
+      } : undefined);
+      if (done) { state.commitMessage = ""; }
+    }, "primary"),
+    amendLabel,
+    (() => {
+      const spacer = document.createElement("span");
+      spacer.style.marginLeft = "auto";
+      return spacer;
+    })(),
+    button("擱置全部", () => runOp("op_stash_save", { path, message: "" }))
+  );
+  box.append(message, actions);
+  left.appendChild(box);
+
+  /* 右欄：差異 */
+  const right = document.createElement("div");
+  right.className = "work-right";
+  right.id = "diff-panel";
+  split.append(left, right);
+  panel.appendChild(split);
+  renderDiffPanel();
+}
+
+/* ---------- 分支 ---------- */
+
+function renderBranches() {
+  const panel = el("tab-branches");
+  panel.replaceChildren();
+  const repo = currentRepo();
+  const data = state.workspace;
+  if (!repo || !data) return;
+  const path = repo.path;
+
+  const grid = document.createElement("div");
+  grid.className = "branch-grid";
+
+  const createBar = document.createElement("div");
+  createBar.className = "branch-form";
+  const newName = document.createElement("input");
+  newName.type = "text";
+  newName.placeholder = "新分支名稱";
+  createBar.append(newName, button("從目前位置建立並切換", () => {
+    if (!newName.value.trim()) return setStatus("請先輸入分支名稱");
+    return runOp("op_create_branch", { path, name: newName.value.trim() });
+  }, "primary"));
+  grid.appendChild(createBar);
+
+  const locals = data.branches.filter((item) => !item.is_remote);
+  const remotes = data.branches.filter((item) => item.is_remote);
+
+  grid.appendChild(heading(`本機分支（${locals.length}）`));
+  const table = document.createElement("div");
+  table.className = "branch-table";
+  for (const branch of locals) {
+    const row = document.createElement("div");
+    row.className = "branch-row";
+    const name = document.createElement("span");
+    name.className = "name" + (branch.is_head ? " head" : "");
+    name.textContent = branch.name + (branch.is_head ? "（目前）" : "");
+    const upstream = document.createElement("span");
+    upstream.className = "upstream";
+    upstream.textContent = branch.upstream ? `→ ${branch.upstream}` : "未追蹤遠端";
+    const grow = document.createElement("span");
+    grow.className = "grow";
+    row.append(name, upstream, grow);
+
+    if (!branch.is_head) {
+      row.appendChild(button("切換", () => runOp("op_checkout", { path, name: branch.name })));
+    }
+    const rename = document.createElement("input");
+    rename.type = "text";
+    rename.placeholder = "改名為";
+    rename.style.width = "9rem";
+    row.append(rename, button("改名", () => {
+      if (!rename.value.trim()) return setStatus("請先輸入新名稱");
+      return runOp("op_rename_branch", { path, from: branch.name, to: rename.value.trim() });
+    }));
+
+    const upstreamSelect = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "不追蹤";
+    upstreamSelect.appendChild(none);
+    for (const remote of remotes) {
+      const option = document.createElement("option");
+      option.value = remote.name;
+      option.textContent = remote.name;
+      option.selected = branch.upstream === remote.name;
+      upstreamSelect.appendChild(option);
+    }
+    upstreamSelect.addEventListener("change", () =>
+      runOp("op_set_upstream", { path, name: branch.name, upstream: upstreamSelect.value || null }));
+    row.appendChild(upstreamSelect);
+
+    if (!branch.is_head) {
+      row.appendChild(button("刪除", () =>
+        runOp("op_delete_branch", { path, name: branch.name }, {
+          title: `刪除分支 ${branch.name}`,
+          detail: "若這條分支上有尚未合併的 commit，刪除後會從清單消失；"
+            + "程式會建立還原點，仍可取回。",
+        }), "ghost danger"));
+    }
+    table.appendChild(row);
+  }
+  grid.appendChild(table);
+
+  if (remotes.length > 0) {
+    grid.appendChild(heading(`遠端分支（${remotes.length}）`));
+    const remoteTable = document.createElement("div");
+    remoteTable.className = "branch-table";
+    for (const branch of remotes) {
+      const row = document.createElement("div");
+      row.className = "branch-row";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = branch.name;
+      row.appendChild(name);
+      remoteTable.appendChild(row);
+    }
+    grid.appendChild(remoteTable);
+  }
+
+  const points = data.undo_points || [];
+  if (points.length > 0) {
+    grid.appendChild(heading(`還原點（${points.length}）`));
+    const undoTable = document.createElement("div");
+    undoTable.className = "branch-table";
+    for (const point of points.slice(0, 10)) {
+      const row = document.createElement("div");
+      row.className = "branch-row";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = `${point.operation} → ${point.oid.slice(0, 8)}`;
+      const when = document.createElement("span");
+      when.className = "upstream";
+      when.textContent = relativeTime(point.created_unix * 1000);
+      const grow = document.createElement("span");
+      grow.className = "grow";
+      row.append(name, when, grow,
+        button("還原到這裡", () =>
+          runOp("op_undo", { path, reference: point.reference }, {
+            title: "還原到這個時間點",
+            detail: `會把分支與工作目錄重設回「${point.operation}」之前的狀態，`
+              + "目前未提交的變更會遺失。",
+          }), "ghost danger"));
+      undoTable.appendChild(row);
+    }
+    grid.appendChild(undoTable);
+  }
+
+  panel.appendChild(grid);
 }
 
 /* ---------- 解決衝突 ---------- */
@@ -1431,15 +1450,39 @@ function renderDiffPanel() {
   const repo = currentRepo();
   const file = (state.diffFiles || []).find((item) => item.path === state.selectedFile);
   if (!repo || !file) {
+    const head = document.createElement("div");
+    head.className = "diff-toolbar";
+    for (const [value, label] of [["unstaged", "未暫存"], ["staged", "已暫存"]]) {
+      head.appendChild(button(label, async () => {
+        state.diffSource = value;
+        state.selectedLines.clear();
+        state.commitDetail = null;
+        await loadDiff();
+        renderWorkspace();
+      }, state.diffSource === value ? "primary" : undefined));
+    }
+    holder.appendChild(head);
     const hint = document.createElement("p");
     hint.className = "action-note";
-    hint.textContent = "選擇左側的檔案檢視差異";
+    hint.style.padding = "0.8rem";
+    hint.textContent = (state.diffFiles || []).length === 0
+      ? (state.diffSource === "staged" ? "沒有已加入索引的變更。" : "沒有未暫存的變更。")
+      : "選擇左側的檔案檢視差異";
     holder.appendChild(hint);
     return;
   }
 
   const bar = document.createElement("div");
   bar.className = "diff-toolbar";
+  for (const [value, label] of [["unstaged", "未暫存"], ["staged", "已暫存"]]) {
+    bar.appendChild(button(label, async () => {
+      state.diffSource = value;
+      state.selectedLines.clear();
+      state.commitDetail = null;
+      await loadDiff();
+      renderWorkspace();
+    }, state.diffSource === value ? "primary" : undefined));
+  }
   const title = document.createElement("span");
   title.className = "diff-title";
   title.textContent = file.old_path ? `${file.old_path} → ${file.path}` : file.path;
@@ -1484,11 +1527,15 @@ function renderDiffPanel() {
     holder.appendChild(selBar);
   }
 
+  const scroll = document.createElement("div");
+  scroll.className = "diff-scroll";
+  holder.appendChild(scroll);
+
   if (file.is_binary) {
     const note = document.createElement("p");
     note.className = "action-note";
     note.textContent = "二進位檔案，無法顯示逐行差異。";
-    holder.appendChild(note);
+    scroll.appendChild(note);
     return;
   }
 
@@ -1533,7 +1580,7 @@ function renderDiffPanel() {
       state.diffMode === "split" ? splitRows(file, hunkIndex, hunk) : inlineRows(file, hunkIndex, hunk)
     );
     block.appendChild(body);
-    holder.appendChild(block);
+    scroll.appendChild(block);
   });
 }
 
@@ -1559,13 +1606,18 @@ async function showFileHistory(file) {
     const holder = el("diff-panel");
     holder.replaceChildren();
     const back = document.createElement("div");
-    back.className = "action-bar";
+    back.className = "diff-toolbar";
     back.append(button("← 回到差異", () => renderDiffPanel()));
+    const label = document.createElement("span");
+    label.className = "diff-title";
+    label.textContent = `${file} 的變更歷史（${oids.length}）`;
+    back.appendChild(label);
     holder.appendChild(back);
-    holder.appendChild(heading(`${file} 的變更歷史（${oids.length}）`));
 
     const list = document.createElement("div");
     list.className = "change-list";
+    list.style.margin = "0.6rem";
+    list.style.overflowY = "auto";
     for (const oid of oids) {
       const detail = await invoke("commit_detail", { path: repo.path, oid });
       const row = document.createElement("div");
@@ -1728,7 +1780,7 @@ async function showBlame(file) {
     holder.replaceChildren();
 
     const bar = document.createElement("div");
-    bar.className = "action-bar";
+    bar.className = "diff-toolbar";
     bar.append(button("← 回到差異", () => renderDiffPanel()));
     const title = document.createElement("span");
     title.className = "diff-title";
